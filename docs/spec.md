@@ -1,4 +1,4 @@
-## A general-purpose spec to support REST-based conversational communication between a client and server
+## A general spec for REST-based conversational communication between a client and server
 
 ## Use cases
 
