@@ -9,7 +9,7 @@ a distributed service with a storage backend for application-level states.
 The application-level semantics of the client-server communication is stateful in nature due to 
 explicit or implicit causality between client-sent and server-sent messages and their ordering. 
 That is, there is no spontaneous client-sent or server-sent messages, e.g. one-way notification or signaling. 
-The most obvious example would be a "high-hz chat" service. 
+The most obvious example would be a "high-hz chatbot" service. 
 
 ## Background: why REST (stateless RPC)
 
@@ -87,6 +87,6 @@ For simplicity, batching is not supported. However, the failover recovery protoc
 as message history. A dedicated request may be used which will encode request/response history in a single HTTP request body
 e.g. with a JSON envelope.
 
-There is no special requirement on how to route HTTP requests to the same server process. When requests are routed to a different process
+There is no special requirement on how to route HTTP requests to the same server process. When requests start to be routed to a different process
 (consistenly), the failover process will be triggered.
 
