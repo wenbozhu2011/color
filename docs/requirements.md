@@ -39,7 +39,7 @@
     
 ## demo and readme
 
-1. Use the fuzzy as the demo too. Slow the message rate, and print verbose log on the client/server to demonstrate the protocol details.
+1. Use the fuzzy as the demo too. Slow the message rate, non-stop, and print verbose log on the client/server to demonstrate the protocol details.
 2. Create a detailed instruction doc (readme.md) on how to install/build/run the demo. Use cmake only.
 3. color/demo
 
