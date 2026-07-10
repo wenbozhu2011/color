@@ -59,7 +59,7 @@ in-memory state for supporting such a conversation protocol. This will require a
 a failover happens due to load distribution, machine draining or process failures. The conversation protocol should enable automatic
 server process failover with minimum support required from the client, without breaking any safety properties. 
 
-## Verification with a reference implementation  
+## Verification
 
 A single client generates a squence of requests to a single server process. The request and response may be dropped arbitarily.
 
