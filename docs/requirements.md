@@ -14,7 +14,7 @@
 ### server (framework)
 
 1. Use net_http as the http server (multi-threaded).
-2. Use the server interceptor API to implement Color, as a resuable framework-level C++ library
+2. Use the interceptor API (on the "server_interceptor" branch) to implement Color, as a resuable framework-level C++ library
 3. Use the interceptor for failiure injection too for verification and demo
 4. Color is transparent to the RPC application logic. However the request/response history
    on the server is visible to the application, i.e. the "conversation state".
