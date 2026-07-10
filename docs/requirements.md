@@ -29,7 +29,7 @@ Phase I design and implementation
 1. Assign a unique request id (as header) for each request which will be echoed back by the response
 2. Each request should have a header that indicates the sequence of responses known to the client when the request is generated.
 3. Note that responses may have gaps in respect to the request id's assigned to each response.
-4. color/protocol.md
+4. color/docs/protocol.md
 
 ### verification
 
@@ -58,7 +58,7 @@ Phase II design and implementation
 
 1. Create a detailed protocol design based on spec.md and the basic REST protocol, including the logical data structure for checkpointing
    the request/response history on the server side.
-2. color/failover.md
+2. color/docs/failover.md
 
 ### implementation and verification
 
