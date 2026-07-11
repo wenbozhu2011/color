@@ -259,24 +259,31 @@ approach, and client + server run **locally on the same VM**.
 
 ---
 
-## 6. Proposed milestones (each a review checkpoint)
+## 6. Milestones and current status
 
-1. **This plan** — agree on understanding, layout, and the dependency approach
-   (§5). ← we are here
-2. **`docs/protocol.md`** — Phase I wire format, headers, ordering rule, and the
-   safety-property argument (formalize **D1–D6**). Review before coding.
-   ← **next up**
-3. **Prototype skeleton** — transport interface + Color core + simulated lossy
-   network + fuzzy driver + history checker (C++17, CMake). Prove S/L properties
-   on seeded runs.
-4. **Real transport** — libcurl client wrapper + net_http interceptor behind the
-   same interface.
-5. **Demo** — slowed, event-printing run + `demo/readme.md` (mechanism per §8).
-6. **`docs/failover.md` + Phase II** — checkpoint data structure, JSON
+1. ✅ **This plan** — understanding, layout, dependency approach (§5), demo (§8)
+   all reviewed and confirmed. *(commits 5ee870f → 7fc3f3b)*
+2. ✅ **`docs/protocol.md`** — Phase I wire format, headers, ordering rule, and
+   the D1–D6 safety-property argument; revised per review (headers-only,
+   version dropped, spec-gap §0, `Color-Hash` optional). *(f221ff0 → 4983b08)*
+3. ✅ **Prototype skeleton (this milestone)** — transport-agnostic Color core
+   (`core/include/color/`), simulated lossy network, fuzzy driver, and invariant
+   checker (`verification/`), C++17 + CMake. Proves the safety **and** liveness
+   properties on seeded, reproducible runs; the checker is itself validated by a
+   negative test. See `verification/plan.md`.
+   - Status: **100/100 seeds pass** at default settings (~98k requests through
+     ~154k drops + ~36k duplicates); passes under `--drop 0.8`; buffers stay
+     bounded. `ctest` wires a smoke + high-loss suite. ← **done**
+4. ⬜ **Real transport** — libcurl client wrapper + net_http interceptor behind
+   the same core interface (`client/`, `server/`).
+5. ⬜ **Demo** — slowed, event-printing run over the real transport +
+   `demo/readme.md` (mechanism per §8). *(the `--verbose` event trace in the
+   harness is the basis for this.)*
+6. ⬜ **`docs/failover.md` + Phase II** — checkpoint data structure, JSON
    persistence, restart/replay, re-run verification, failover demo.
 
-Commit granularity: you'll direct this as we go; my default is one reviewable
-slice per commit to `main`.
+Commit granularity: you direct this as we go; my default is one reviewable slice
+per commit to `main`.
 
 ---
 
