@@ -2,11 +2,14 @@
 // plain echo endpoint speak the Color conversation protocol.
 //
 // The application is a trivial echo (replies with the server timestamp), fully
-// unaware of Color. Kill and restart this process on the same port to exercise
-// the (Phase II) failover demo; the client keeps retrying, oblivious.
+// unaware of Color. With --checkpoint, the server periodically saves its state
+// to a JSON file and restores from it on startup: kill and restart this process
+// on the same port (same --checkpoint) to exercise the failover demo; the client
+// keeps going, oblivious.
 //
 // Usage:
 //   color_server [--port P] [--threads T] [--uri U] [--hash] [--quiet]
+//                [--checkpoint FILE] [--checkpoint-every N]
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -36,6 +39,8 @@ int main(int argc, char** argv) {
   std::string uri = "/color";
   bool set_hash = false;
   bool quiet = false;
+  std::string checkpoint;
+  int checkpoint_every = 16;
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
     auto next = [&](int& i) { return std::string(argv[++i]); };
@@ -44,6 +49,8 @@ int main(int argc, char** argv) {
     else if (a == "--uri") uri = next(i);
     else if (a == "--hash") set_hash = true;
     else if (a == "--quiet") quiet = true;
+    else if (a == "--checkpoint") checkpoint = next(i);
+    else if (a == "--checkpoint-every") checkpoint_every = std::stoi(next(i));
     else { std::fprintf(stderr, "unknown arg: %s\n", a.c_str()); return 2; }
   }
 
@@ -64,7 +71,11 @@ int main(int argc, char** argv) {
            ",\"seq\":" + std::to_string(seq) + "}";
   };
 
-  color::ColorInterceptor color(app, set_hash);
+  color::ColorInterceptor color(app, set_hash, checkpoint,
+                                static_cast<std::size_t>(checkpoint_every));
+  if (color.restored())
+    std::printf("restored from checkpoint %s (committed_upto=%llu)\n",
+                checkpoint.c_str(), (unsigned long long)color.committed_upto());
   if (!quiet) {
     color.on_committed([](color::Seq seq, const std::string& payload) {
       std::printf("  [commit] seq=%llu -> %s\n", (unsigned long long)seq,

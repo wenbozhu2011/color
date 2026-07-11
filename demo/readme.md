@@ -63,21 +63,47 @@ in-order commit):
     --count 40 --parallel 4 --interval-ms 20 --drop 0.4 --drop-resp 0.4 --hash
 ```
 
+## Failover demo (kill and restart the server)
+
+Give the server a checkpoint file and it will periodically persist its state and
+restore from it on startup. Kill the server mid-conversation and restart it on
+the same port — the client keeps going, unaware.
+
+```sh
+# Terminal 1 — server with a checkpoint file, checkpointing every 5 commits.
+./build/demo/src/color_server --port 8080 --uri /color --hash \
+    --checkpoint /tmp/color.ckpt --checkpoint-every 5
+
+# Terminal 2 — a longer client run so you have time to kill the server.
+./build/demo/src/color_client --url http://127.0.0.1:8080/color \
+    --count 100 --interval-ms 200 --drop 0.2 --drop-resp 0.2 --hash
+
+# Terminal 1 — Ctrl-C (or `kill -9`) the server, then restart it, same command:
+./build/demo/src/color_server --port 8080 --uri /color --hash \
+    --checkpoint /tmp/color.ckpt --checkpoint-every 5
+```
+
+On restart the server prints `restored from checkpoint … (committed_upto=N)`.
+The client prints a single `[recover] … replayed K history events` line as it
+replays the small tail the checkpoint lagged, then the conversation continues
+and still finishes with `hash mismatches=0`. The client command line is
+identical to the non-failover demo — nothing about running the client changes.
+
 ## Options
 
 **color_server** — `--port` (8080), `--threads` (4), `--uri` (/color),
-`--hash`, `--quiet`.
+`--hash`, `--quiet`, `--checkpoint FILE`, `--checkpoint-every N` (16).
 
 **color_client** — `--url`, `--count` (20), `--interval-ms` (1000),
 `--parallel` (1), `--drop` (0.3), `--drop-resp` (0.3), `--seed` (1), `--hash`,
-`--quiet`.
+`--quiet`. Failover recovery (the `503`/replay handshake) is automatic; there is
+no client flag for it.
 
 ## Notes
 
 - **One server process is one conversation.** A fresh client restarts its
   sequence at 1, so pointing a new client at an already-used server makes its
   early requests look like duplicate retries of the previous conversation
-  (you'll see hash mismatches). Start a fresh server per client run.
-- **Failover** (kill and restart the *server* on the same port while the client
-  keeps going) needs the Phase II checkpoint/reload support and will be added
-  with that milestone; it is not part of this Phase I demo.
+  (you'll see hash mismatches). Start a fresh server per client run — but a
+  *restarted* server that reloads its checkpoint continues the same
+  conversation, which is exactly the failover case above.

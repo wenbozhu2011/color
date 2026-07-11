@@ -2,7 +2,10 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <thread>
+
+#include "failover_json.h"
 
 namespace color {
 
@@ -38,6 +41,19 @@ void ColorHttpClient::send(const std::string& payload, int retry_delay_ms) {
   for (int attempt = 1;; ++attempt) {
     Injected inj = Injected::kNone;
     HttpResult res = transport_->post(url_, headers, req.payload, &inj);
+
+    // Failover recovery: the server lost history and asks us to replay. Handle
+    // it, then re-POST the same request. The core conversation is unchanged.
+    if (res.delivered && res.status == 503) {
+      auto rit = res.headers.find("color-recover");
+      if (rit != res.headers.end()) {
+        const char* v = rit->second.c_str();
+        const char* eq = std::strchr(v, '=');
+        recover(std::strtoull(eq ? eq + 1 : v, nullptr, 10));
+        continue;  // resend the original request to the rebuilt server
+      }
+    }
+
     if (on_attempt_) on_attempt_({req.seq, inj, res.delivered, attempt});
 
     if (res.delivered) {
@@ -58,6 +74,27 @@ void ColorHttpClient::send(const std::string& payload, int retry_delay_ms) {
     // Dropped or errored: pace, then re-POST the identical (frozen) request.
     std::this_thread::sleep_for(std::chrono::milliseconds(retry_delay_ms));
   }
+}
+
+void ColorHttpClient::recover(std::size_t from) {
+  std::string body;
+  std::size_t nevents = 0;
+  {
+    std::lock_guard<std::mutex> lk(mu_);
+    Replay rp = core_.build_replay(from);
+    nevents = rp.events.size();
+    body = to_json(rp);
+  }
+  const std::vector<std::string> headers = {
+      "Color-Replay: " + std::to_string(from), "Content-Type: application/json"};
+  // POST the replay, retrying on drops until the server acknowledges it.
+  for (;;) {
+    Injected inj = Injected::kNone;
+    HttpResult res = transport_->post(url_, headers, body, &inj);
+    if (res.delivered && res.status == 200) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+  if (on_recover_) on_recover_(from, nevents);
 }
 
 }  // namespace color

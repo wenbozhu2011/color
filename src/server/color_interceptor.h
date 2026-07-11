@@ -10,11 +10,19 @@
 // exactly as the core requires. The core is not thread-safe, so all access is
 // serialized under a mutex; holding request objects until a later request
 // completes them is the net_http async-reply pattern.
+//
+// Failover: the interceptor can restore its core from a checkpoint file on
+// startup and rewrite it periodically. When the core reports it is missing
+// history, the interceptor replies 503 with a Color-Recover header; the client
+// answers with a replay request (Color-Replay header + JSON body), which the
+// interceptor ingests to rebuild.
 #ifndef COLOR_COLOR_INTERCEPTOR_H
 #define COLOR_COLOR_INTERCEPTOR_H
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -32,7 +40,11 @@ class ColorInterceptor {
 
   // `app` is the application logic, invoked in committed order (transparent to
   // Color). `set_hash` echoes the optional verification hash in responses.
-  explicit ColorInterceptor(ColorServer::AppFn app, bool set_hash = false);
+  // If `checkpoint_path` is non-empty, the core is restored from that file on
+  // startup (when present) and rewritten every `checkpoint_every` commits.
+  ColorInterceptor(ColorServer::AppFn app, bool set_hash = false,
+                   std::string checkpoint_path = "",
+                   std::size_t checkpoint_every = 16);
 
   // Register this interceptor for `uri` on `server`. A no-op fallback handler is
   // also registered so the path is dispatchable; the interceptor returns kExit
@@ -41,17 +53,29 @@ class ColorInterceptor {
 
   void on_committed(EventFn fn) { on_committed_ = std::move(fn); }
   void on_hash_mismatch(ColorServer::HashMismatchFn fn) {
-    core_.on_hash_mismatch(std::move(fn));
+    core_->on_hash_mismatch(std::move(fn));
   }
+
+  // Whether a checkpoint was loaded at construction (for the demo banner).
+  bool restored() const { return restored_; }
+  Seq committed_upto() const { return core_->committed_upto(); }
 
  private:
   net_http::InterceptResult OnRequest(net_http::ServerRequestInterface* req);
+  net_http::InterceptResult OnReplay(net_http::ServerRequestInterface* req);
   static Request Parse(net_http::ServerRequestInterface* req);
+  static std::string ReadBody(net_http::ServerRequestInterface* req);
   void Complete(net_http::ServerRequestInterface* req, const Response& resp);
+  void MaybeCheckpoint(std::size_t committed);  // caller holds mu_
+  void WriteCheckpoint();                        // caller holds mu_
 
   std::mutex mu_;
-  ColorServer core_;  // guarded by mu_
+  std::unique_ptr<ColorServer> core_;  // guarded by mu_
   bool set_hash_;
+  std::string checkpoint_path_;
+  std::size_t checkpoint_every_;
+  std::size_t commits_since_ckpt_ = 0;  // guarded by mu_
+  bool restored_ = false;
   EventFn on_committed_;
   // Requests whose HTTP reply is still pending, keyed by seq (guarded by mu_).
   std::unordered_map<Seq, net_http::ServerRequestInterface*> pending_;
