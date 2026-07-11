@@ -10,7 +10,7 @@ libcurl ↔ net_http transport (milestones 4–5).
 ## Layout
 
 ```
-core/                       transport-agnostic Color core (compiled library)
+src/core/                   transport-agnostic Color core (compiled library)
   color_message.h             Request / Response wire structs (the header set)
   color_history.h/.cc         committed history + rolling hash (§4, §7)
   color_client.h/.cc          ColorClient state machine (§5)

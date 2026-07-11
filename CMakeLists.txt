@@ -19,10 +19,10 @@ add_compile_options(-Wall -Wextra)
 
 # Transport-agnostic Color core: compiled static library.
 add_library(color_core STATIC
-  core/color_history.cc
-  core/color_client.cc
-  core/color_server.cc)
-target_include_directories(color_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core)
+  src/core/color_history.cc
+  src/core/color_client.cc
+  src/core/color_server.cc)
+target_include_directories(color_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
 target_compile_features(color_core PUBLIC cxx_std_17)
 
 enable_testing()

@@ -267,7 +267,7 @@ approach, and client + server run **locally on the same VM**.
    the D1–D6 safety-property argument; revised per review (headers-only,
    version dropped, spec-gap §0, `Color-Hash` optional). *(f221ff0 → 4983b08)*
 3. ✅ **Prototype skeleton (this milestone)** — transport-agnostic Color core
-   (`core/`, compiled library), simulated lossy network, fuzzy driver, and
+   (`src/core/`, compiled library), simulated lossy network, fuzzy driver, and
    invariant checker (`verification/`), C++17 + CMake. Proves the safety **and**
    liveness
    properties on seeded, reproducible runs; the checker is itself validated by a
