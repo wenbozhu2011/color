@@ -40,9 +40,6 @@ and checks, on every run:
 - **bounded buffers** — retransmission state stays bounded, independent of run
   length.
 
-The same suite injects **server failovers** and confirms the properties still
-hold across them.
-
 → See **[docs/claude/verification.md](docs/claude/verification.md)**
 (build & run: [verification/readme.md](verification/readme.md))
 
@@ -121,7 +118,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release   # first run fetches net_http+ab
 cmake --build build -j
 ```
 
-### Run (same machine, two terminals)
+### Run (same machine)
 
 ```sh
 # Terminal 1 — the server. One process == one conversation.
@@ -136,7 +133,7 @@ The server prints a `[commit]` line per request as it commits in order; the
 client prints each delivered reply and every retransmitted attempt. Despite the
 drops, the conversation advances in order and finishes with `hash mismatches=0`.
 
-Try more concurrency and out-of-order arrival:
+More concurrency and out-of-order arrivals:
 
 ```sh
 ./build/demo/src/color_client --url http://127.0.0.1:8080/color \
