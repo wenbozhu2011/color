@@ -156,8 +156,7 @@ net_http::InterceptResult ColorInterceptor::OnRequest(
 //     with a small `checkpoint_every_` the pauses are frequent but short.
 // This is deliberately the simplest correct scheme. A production server would
 // move the write off the hot path — snapshot under mu_, then serialize/fsync on
-// a background or timer thread — trading this sync simplicity for lower latency
-// (see docs/failover.md §8).
+// a background or timer thread — trading this sync simplicity for lower latency.
 void ColorInterceptor::MaybeCheckpoint(std::size_t committed) {
   if (checkpoint_path_.empty() || checkpoint_every_ == 0) return;
   commits_since_ckpt_ += committed;
