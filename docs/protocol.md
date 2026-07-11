@@ -12,6 +12,7 @@ the D6 proof.
 
 ## Contents
 
+0. Where this design corrects or extends `spec.md`
 1. Terminology and identifiers
 2. HTTP mapping and header summary
 3. The three mechanisms (id, acknowledgement, history hash)
@@ -24,6 +25,33 @@ the D6 proof.
 10. Liveness and bounded buffers (L1–L2)
 11. Design decisions and notes
 12. Forward pointer to Phase II
+
+---
+
+## 0. Where this design corrects or extends `spec.md`
+
+Two points where `spec.md` is either inaccurate or silent. Both are
+load-bearing for correctness, so they are called out up front.
+
+1. **Response acknowledgement must convey *order*, not just a set.** `spec.md`
+   states that the ordering of received responses is significant (its property 3
+   / S4), yet the "sequence of responses known to the client" it describes reads
+   as a *set* of ids. A set cannot express the order in which the client
+   received responses that completed **out of order** (e.g. `rsp-256` received
+   before `rsp-234`). This design therefore has the acknowledgement carry an
+   **ordered** delta of newly-received responses (`Color-Ack-New`, §11.1), not
+   just a cumulative set. Without it, client and server would order
+   jointly-acknowledged responses differently and the single-total-order
+   invariant would break.
+
+2. **Duplicated messages, not just lost ones.** `spec.md` §5 frames failures as
+   *loss* only ("requests or responses may be lost … the client will retry"). It
+   does not mention that retries and the network also cause **duplicate
+   delivery** of requests (and responses). The protocol must be idempotent under
+   duplication: the server dedups requests by `Color-Seq` and never reprocesses
+   (S5), and the client ignores duplicate responses. The verification harness
+   deliberately **duplicates** messages (per `requirements.md`), so this is a
+   first-class case here, not an afterthought.
 
 ---
 
@@ -59,9 +87,13 @@ responses" of the requirements. Request ids themselves never have gaps.
 
 ## 2. HTTP mapping and header summary
 
-- **Method / path.** Every message is `POST /v1/converse`. The body is the
-  opaque application payload (JSON in the reference app). POST is safe to
-  retransmit here precisely because Color provides exactly-once semantics.
+- **Method.** Every Color message is an HTTP `POST`; the body is the opaque
+  application payload (JSON in the reference app). POST is safe to retransmit
+  here precisely because Color provides exactly-once semantics.
+- **Path is the application's choice.** Color neither defines nor constrains the
+  request URL/path — that is entirely up to the application. Color is carried
+  **through HTTP headers only**, so it layers onto any POST endpoint. The
+  examples below use a placeholder path (`POST …`).
 - **One request → one response.** No batching (Phase I). Parallel requests use
   separate concurrent POSTs.
 - **Transport-level retry.** Request/response loss is handled *below* Color by
@@ -73,7 +105,6 @@ responses" of the requirements. Request ids themselves never have gaps.
 
 | Header | Meaning | Refs |
 |---|---|---|
-| `Color-Version` | Protocol version, `1`. | |
 | `Color-Seq` | This request's id `n` (contiguous, monotonic). | D2 |
 | `Color-Ack-Base` | Cumulative low-water `b`: **all responses with id `< b` have been received.** `1` initially. | D1, D4 |
 | `Color-Ack-New` | The **ordered** list of response ids received since the previously-generated request, **in receipt order** (may be empty). This is what conveys the client's receive order to the server. | D1, D6 |
@@ -83,9 +114,12 @@ responses" of the requirements. Request ids themselves never have gaps.
 
 | Header | Meaning | Refs |
 |---|---|---|
-| `Color-Version` | Protocol version, `1`. | |
 | `Color-Seq` | Echo of the request id `n` this response answers. | D2 |
 | `Color-Hash` | The server's running history hash **after committing `R<n>`** (the prefix ending at the request being answered; the response's own `r<n>` token is not yet committed — see §4/§7). | D5 |
+
+**Versioning** is intentionally omitted from Phase I for simplicity. A deployment
+that needs to evolve the wire format can add a version header (e.g.
+`Color-Version`) without affecting any of the rules here.
 
 Application-level results (including application errors) travel in the response
 **body**; HTTP `200` is used for any *delivered* Color response. `5xx` is
@@ -216,7 +250,7 @@ append R<seq> to history;    cur_hash = Hash(cur_hash, "R"+seq); hashmap[R<seq>]
 
 base = 1 + (longest prefix 1..m all in received)
 
-msg = POST /v1/converse
+msg = POST <application-defined path>
       Color-Seq: seq, Color-Ack-Base: base, Color-Ack-New: csv(new),
       Color-Hash: cur_hash, body: p
 inflight[seq] = msg                            # frozen; retries resend verbatim
@@ -362,9 +396,7 @@ Client sends request 1 (nothing received yet, so `Ack-Base: 1`, empty
 `Ack-New`), commits `R1` → hash `h1`:
 
 ```
-POST /v1/converse HTTP/1.1
-Host: localhost:8080
-Color-Version: 1
+POST … (application-defined path)
 Color-Seq: 1
 Color-Ack-Base: 1
 Color-Ack-New:
@@ -378,8 +410,7 @@ Server commits `R1` (no gap), recomputes `h1` ✓, runs the app, buffers and
 returns the response echoing `seq` and carrying `h1`:
 
 ```
-HTTP/1.1 200 OK
-Color-Version: 1
+200 OK
 Color-Seq: 1
 Color-Hash: h1
 Content-Type: application/json
@@ -392,8 +423,7 @@ Client receives `r1` (checks `h1` ✓), records it in `pending_new`. Next reques
 → hash `h3`:
 
 ```
-POST /v1/converse HTTP/1.1
-Color-Version: 1
+POST … (application-defined path)
 Color-Seq: 2
 Color-Ack-Base: 2
 Color-Ack-New: 1
@@ -420,16 +450,15 @@ order, and sends both — but **the network delivers response 3 before response
 2**:
 
 ```
-HTTP/1.1 200 OK   Color-Seq: 3   Color-Hash: h4     # arrives first
-HTTP/1.1 200 OK   Color-Seq: 2   Color-Hash: h3     # arrives second
+200 OK   Color-Seq: 3   Color-Hash: h4     # arrives first
+200 OK   Color-Seq: 2   Color-Hash: h3     # arrives second
 ```
 
 The client's receipt order is therefore `r3` then `r2`, so `pending_new = [3, 2]`.
 Request 4 freezes that order and drives base to 4 (all of 1,2,3 received):
 
 ```
-POST /v1/converse HTTP/1.1
-Color-Version: 1
+POST … (application-defined path)
 Color-Seq: 4
 Color-Ack-Base: 4
 Color-Ack-New: 3,2
@@ -469,7 +498,7 @@ with `r2` still buffered and **resends the buffered `r2`** (no reprocessing):
 POST … Color-Seq: 2  Color-Ack-Base: 2  Color-Ack-New: 1  Color-Hash: h3
 
 # server response (resent from buffer, not recomputed)
-HTTP/1.1 200 OK  Color-Seq: 2  Color-Hash: h3
+200 OK  Color-Seq: 2  Color-Hash: h3
 {"ts":"2026-07-11T18:00:00.004Z"}        # identical payload as first generation
 ```
 
