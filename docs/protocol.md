@@ -633,10 +633,15 @@ acknowledged that response), so the reply is harmlessly discarded.
 
 ## 12. Forward pointer to Phase II (failover)
 
-Phase II (`docs/failover.md`) will checkpoint the server's committed history plus
-`resp_buffer` and `acked`/`committed_upto` (note `Color-Ack-Base` is already the
-compact form of "what the client has confirmed"). On failover a new server loads
-the checkpoint; a request whose history the new server lacks is answered with a
-`5xx`, prompting the client to replay its known request/response history in a
-single JSON-enveloped request so the new server can rebuild. None of this changes
-the Phase I wire rules above; it only adds recovery on top of them.
+Phase II (`docs/failover.md`) adds server failover with **no client-side
+changes at all** — the client keeps retransmitting and acknowledging exactly as
+above, unaware that the server process was replaced. The server periodically
+checkpoints its active window (`committed_upto`, the running history hash, and
+the unacknowledged responses; note `Color-Ack-Base` is already the compact form
+of "what the client has confirmed") and obeys one rule: **release a response only
+after its commit is durable in a checkpoint.** That rule guarantees a
+replacement server, loaded from the checkpoint, already holds everything the
+client could still be waiting on, so ordinary client retries drive recovery. The
+Phase I wire rules above are unchanged. (This design deliberately does **not** use
+the `5xx`-and-replay approach sketched in `spec.md`, which would require the
+client to change; see `docs/failover.md` §7.)
