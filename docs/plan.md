@@ -1,10 +1,11 @@
 # Color — Project Plan and Shared Understanding
 
-Status: **DRAFT for review**. This document summarizes my understanding of the
-problem (`spec.md`) and the implementation requirements (`requirements.md`)
-*before* we finalize the protocol design (`docs/protocol.md`) and start coding.
-It is intentionally a restatement + open-questions document, not the design
-itself. Please correct anything below that misrepresents the intent.
+Status: **REVIEWED — decisions incorporated** (review round 1 on commit
+`5ee870f`). This document summarizes my understanding of the problem (`spec.md`)
+and the implementation requirements (`requirements.md`), now updated with the
+answers from the review. The former "open design questions" (Q1–Q5) are resolved
+below and become the inputs to `docs/protocol.md`. One item remains open: the
+**demo mechanism** (§8). See §9 for the consolidated review outcome.
 
 ---
 
@@ -96,28 +97,57 @@ happens-before relation (request → its response; acknowledged responses → th
 acknowledging request) whose linearization is *identical* on both sides. That's
 the S-invariant.
 
-### Open design questions to settle in `protocol.md`
-- **Q1. Acknowledgement encoding.** How does the client express "responses I've
-  seen" compactly given gaps? (Options: highest-contiguous id + explicit list of
-  received ids beyond the gap; a bitmap window; run-length of ranges.) This
-  drives header size and buffer-release logic.
-- **Q2. Id spaces.** One monotonic id space assigned by the client per request,
-  with the response reusing the request's id? Or separate request-id and
-  response-id spaces? (Requirements say "responses may have gaps *w.r.t. the
-  request ids*", which suggests responses are keyed by their request id and the
-  gaps come from out-of-order completion.) Need to state this precisely.
-- **Q3. Buffer-release rule.** Exact condition under which the server may drop a
-  buffered response, and under which the client may stop expecting a response —
-  and the argument that both stay bounded under continued progress.
-- **Q4. History hashing for verification.** `requirements.md` §verification
-  suggests hashing the ordered request/response history (keyed by last
-  request/response id) and carrying the hash on each message so each side can
-  check its history against the peer's. Need to define exactly what is hashed
-  and how the two sides align on the same prefix before comparing.
-- **Q5. Total-order definition.** State the canonical ordering rule that both
-  sides independently compute (e.g. order by request id, with each response
-  slotted immediately after the request that acknowledges it / after its own
-  request), and prove both sides derive the same sequence.
+### Resolved design decisions (from review round 1)
+
+These were the open questions Q1–Q5; the review settled them as follows. They
+are the inputs `docs/protocol.md` must formalize and prove.
+
+- **D1. Acknowledgement encoding (was Q1).** The client sends an **acknowledgement
+  array**: a **`base` id** meaning *"all responses with id < base have been
+  received"* (a contiguous high-water mark), **followed by an explicit list of
+  the individual larger, non-contiguous ids received beyond `base`**. Example:
+  `base=124, [126, 130]` means the client has all responses < 124, plus 126 and
+  130, but not 124, 125, 127–129. Chosen over bitmap/run-length because it is
+  **human-readable** — important for a REST client that a person can drive by
+  hand. This confirms §7-B: the ack must express a *non-contiguous* set.
+- **D2. Id spaces (was Q2).** A **single monotonic id space assigned by the
+  client** for requests. The **response simply echoes back the request id** it
+  answers (no separate response-id space), unless a safety property later forces
+  extra info. "Gaps in responses" therefore means: at a given instant the client
+  holds responses for a non-contiguous subset of the request ids it has sent
+  (because parallel requests complete out of order).
+- **D3. History encoding (refines D2).** In the ordered message history, a
+  request appears as its bare id and a response appears as the request id with a
+  **`rsp-` prefix** (string or numeric tag). Example history as generated/
+  delivered:
+  `{ … 123, rsp-123, 234, 256, rsp-256, rsp-234 … }` — i.e. 234 and 256 were
+  issued (parallel), 256 answered before 234.
+- **D4. Buffer-release rule (was Q3).** When the server receives a request `X`
+  whose acknowledgement (dependencies) includes an earlier response `Y`, the
+  server may safely **drop buffered response `Y`** — the client has provably
+  already received `Y` (the response for request `Y`). This bounds the server
+  retransmission buffer (L2), given continued client progress.
+- **D5. History hashing for verification (was Q4).** Both sides maintain the
+  request/response history as an ordered array of ids (in total order) and a map
+  **`{ req/rsp-id → running hash of the history up to and including that id }`**.
+  Each request/response **piggybacks the sender's current history hash**; the
+  receiver looks up the same id in its own map and compares hashes, giving
+  efficient incremental verification that both histories agree on every prefix.
+- **D6. Total-order definition + proof obligation (was Q5).** Requests and
+  responses live in **one interleaved history**, ordered as they are *generated
+  or delivered*:
+  - **Client side:** requests are ordered as they are generated; responses are
+    ordered as they are received.
+  - **Server side:** each response's position is **derived from the request that
+    acknowledges it** (the server can't observe the client's receive instant
+    directly).
+  `protocol.md` must **prove both sides derive the identical sequence.** Note the
+  subtlety to nail in that proof: a single acknowledging request can newly-ack a
+  *set* of responses, and the server sees only the set, not the client's
+  intra-set receive order — so the canonical rule for ordering responses
+  newly-acked by the same request (e.g. by ascending id) must be defined so that
+  it coincides with the client's realized order. The D5 hash is what *detects*
+  any divergence at runtime; the proof is what *guarantees* there is none.
 
 ---
 
@@ -178,13 +208,15 @@ repo-root, tell me and I'll adjust.)
   nonce); server reply = its own timestamp payload.
 - Requests/responses dropped or duplicated randomly.
 - Check the `spec.md` correctness properties; compare per-side history via the
-  hash-carried-on-each-message scheme (Q4).
-- Run up to ~5 min co-located; optionally inject server processing delay.
+  hash-carried-on-each-message scheme (**D5**).
+- Run up to ~5 min. **Client and server run locally on the same VM** (confirmed
+  in review — no cross-machine setup); optionally inject server processing delay.
 
 ### Demo
 - Reuse the fuzzer as the demo, but slow the message rate, run continuously, and
   print client/server events to make the protocol legible.
 - `readme.md` with full install/build/run instructions; **cmake only**.
+- **Open item:** exactly which transport the demo drives — see §8.
 
 ### Phase II — Failover
 - Protocol design in `docs/failover.md`, including the **logical data structure
@@ -201,40 +233,29 @@ repo-root, tell me and I'll adjust.)
 
 ---
 
-## 5. Dependency & environment note — needs your call
+## 5. Dependency & environment approach — DECIDED
 
-There is a tension between the requirements and what actually builds/runs in
-this session, and I want to surface it before coding:
+Review outcome: **"go with your proposal."** We use the transport-abstraction
+approach, and client + server run **locally on the same VM**.
 
 - **As specified**, the client depends on **libcurl** and the server on the
   **`wenbozhu2011/net_http` fork (`server_interceptor` branch)** over real HTTP.
-- **In this remote environment**, pulling and building that fork (and wiring a
-  real HTTP loopback) may not be feasible, and even if it builds, correctness of
-  the *protocol* is best proven deterministically.
+- **Chosen approach:** the Color core is written **once** against a small
+  transport interface; the simulated network and the real (libcurl + net_http)
+  transports are two implementations of that interface. Prove correctness on the
+  simulated transport first, then wire the real transports — without duplicating
+  protocol logic.
 
-**Proposed approach (matches the scope you approved — "protocol design +
-self-contained prototype"):**
 - **Phase 1a — self-contained prototype (builds & runs here):** implement the
   Color core as a transport-agnostic C++17 library with a *simulated* in-process
   network that drops/duplicates/reorders requests and responses on demand. The
-  fuzzy driver + correctness checker run against this to actually *prove* the
+  fuzzy driver + correctness checker run against this to *prove* the
   safety/liveness properties deterministically and reproducibly (seeded RNG).
   This is the artifact that validates the design.
-- **Phase 1b — real-transport integration (structured, may be build-only
-  here):** wire the same Color core behind (a) the libcurl client wrapper and
-  (b) the net_http interceptor, so the identical protocol logic runs over real
-  HTTP. Kept behind the same interface as the simulated transport so nothing in
-  the core changes.
-
-The Color core is written once against a small transport interface; the
-simulated network and the real (libcurl + net_http) transports are just two
-implementations of that interface. This lets us prove correctness here *and*
-satisfy the real-dependency requirement without duplicating protocol logic.
-
-**Decision needed:** OK to proceed with the transport-abstraction approach
-(prove correctness on the simulated transport first, then wire real
-libcurl/net_http), or do you want the real net_http/libcurl path attempted
-up front?
+- **Phase 1b — real-transport integration:** wire the same Color core behind
+  (a) the libcurl client wrapper and (b) the net_http interceptor, running over
+  an HTTP loopback on the same VM. Kept behind the same interface as the
+  simulated transport so nothing in the core changes.
 
 ---
 
@@ -243,13 +264,14 @@ up front?
 1. **This plan** — agree on understanding, layout, and the dependency approach
    (§5). ← we are here
 2. **`docs/protocol.md`** — Phase I wire format, headers, ordering rule, and the
-   safety-property argument (resolve Q1–Q5). Review before coding.
+   safety-property argument (formalize **D1–D6**). Review before coding.
+   ← **next up**
 3. **Prototype skeleton** — transport interface + Color core + simulated lossy
    network + fuzzy driver + history checker (C++17, CMake). Prove S/L properties
    on seeded runs.
 4. **Real transport** — libcurl client wrapper + net_http interceptor behind the
    same interface.
-5. **Demo** — slowed, event-printing run + `demo/readme.md`.
+5. **Demo** — slowed, event-printing run + `demo/readme.md` (mechanism per §8).
 6. **`docs/failover.md` + Phase II** — checkpoint data structure, JSON
    persistence, restart/replay, re-run verification, failover demo.
 
@@ -258,13 +280,58 @@ slice per commit to `main`.
 
 ---
 
-## 7. Points I most want your confirmation on
+## 7. Confirmation points — RESOLVED
 
-- **A.** Is my statement of the safety invariant (§1: single identical total
-  order, "server knows exactly what the client sees") the right north star?
-- **B.** The acknowledgement header must express a *non-contiguous* set of
-  seen responses (Q1). Agreed, or do you intend responses the client sees to
-  always be contiguous (which would simplify things)?
-- **C.** The dependency approach in §5 (transport abstraction; prove on
-  simulated network first, then real libcurl/net_http).
-- **D.** Repository layout in §3 (repo-root vs a `color/` subdir).
+- **A. Safety invariant** (single identical total order; "server knows exactly
+  what the client sees") → **confirmed** as the north star.
+- **B. Non-contiguous acknowledgement** → **confirmed** ("the former"): the ack
+  must express a non-contiguous set of seen responses (see **D1**).
+- **C. Dependency approach** (§5 transport abstraction; simulated first, then
+  real libcurl/net_http) → **confirmed** ("go with your proposal").
+- **D. Repository layout** (§3) → no objection raised; proceeding with the
+  **repo-root layout** (`docs/`, `client/`, `server/`, `verification/`,
+  `demo/`). Say the word if you'd rather nest everything under a `color/` subdir.
+
+---
+
+## 8. Demo mechanism — proposal (the one remaining open item)
+
+Review note: *"Let's go with your proposal. Then we need to figure out how the
+demo would work."* Here's my proposal for confirmation:
+
+- The **verification harness** runs the Color core over the **simulated
+  transport** (deterministic, seeded, fast) — that's where we *prove*
+  correctness.
+- The **demo** runs the **same Color core over the real transport** (libcurl
+  client ↔ net_http server, HTTP loopback on one VM), because Phase II needs to
+  literally **kill and restart the server process** on the same port — only a
+  real process/socket makes that demonstration meaningful.
+- Demo behaviour: slow the request rate (e.g. ~1/sec), run non-stop, and print a
+  readable per-message event log on **both** client and server showing: request
+  id, the acknowledgement array (`base` + extra ids, per **D1**), whether the
+  request/response was injected-dropped and retried, the resulting ordered
+  history, and the piggybacked history hash (**D5**) with a ✓/✗ match marker.
+- For the **Phase II failover demo**: manually kill the net_http server, restart
+  it on the same port; it reloads the checkpointed JSON history; the libcurl
+  client — still retrying, unaware — resumes; the event log shows the "chat"
+  continuing across the restart, with history hashes still matching.
+
+Trade-off to note: this means the *demo* depends on the real libcurl/net_http
+build (Phase 1b), whereas *verification* does not. If you'd prefer the demo to
+also run purely on the simulated transport (no external build) — printing the
+same event log but simulating the "restart" in-process — that's a smaller,
+fully-self-contained alternative. **Which do you want: real-transport demo
+(recommended, needed for a genuine failover demo) or simulated-transport
+demo?**
+
+---
+
+## 9. Review outcome (round 1) — summary
+
+- Q1–Q5 resolved as **D1–D6** (§2); ack encoding, id reuse, history encoding,
+  buffer-release, hashing, and the total-order proof obligation are all pinned.
+- §7 A/B/C confirmed; D defaulted to repo-root layout.
+- §5 dependency approach and single-VM co-location confirmed.
+- **One open item:** demo transport (§8).
+- **Next step:** with your OK on §8, write **`docs/protocol.md`** formalizing
+  D1–D6, including the §2/D6 total-order proof.
