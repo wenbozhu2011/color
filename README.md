@@ -126,7 +126,7 @@ cmake --build build -j
 
 # Terminal 2 — the client, dropping ~30% of requests and responses.
 ./build/demo/src/color_client --url http://127.0.0.1:8080/color \
-    --count 30 --interval-ms 1000 --drop 0.3 --drop-resp 0.3 --hash
+    --count 20 --interval-ms 1000 --drop 0.3 --drop-resp 0.3 --hash
 ```
 
 The server prints a `[commit]` line per request as it commits in order; the
