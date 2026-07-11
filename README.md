@@ -140,6 +140,9 @@ More concurrency and out-of-order arrivals:
     --count 40 --parallel 4 --interval-ms 20 --drop 0.4 --drop-resp 0.4 --hash
 ```
 
+Start a fresh server per client run — but a restarted server that reloads 
+its checkpoint continues the same conversation (see below).
+
 ### Failover demo
 
 Give the server a checkpoint file and it will periodically persist its state and
