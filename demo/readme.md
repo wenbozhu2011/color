@@ -1,4 +1,4 @@
-# Color demo — run the client and server
+# Color demo
 
 Runnable programs that drive a real Color conversation over HTTP (libcurl client
 ↔ net_http server) on one machine. The client injects request/response drops and
