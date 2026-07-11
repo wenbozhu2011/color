@@ -1,7 +1,7 @@
 # Color — Phase II: Server Failover (design)
 
 Status: **DRAFT for review.** This document designs server failover on top of the
-Phase I protocol (`docs/protocol.md`). It is a design/protocol document; the
+Phase I protocol (`docs/claude/protocol.md`). It is a design/protocol document; the
 checkpoint implementation and the failover verification/demo follow in the
 Phase II milestone.
 
@@ -66,7 +66,7 @@ keeps making progress.
 ## 2. Server checkpoint (the persisted active state)
 
 Periodically — every `T` ms **or** every `N` commits, whichever comes first (the
-`requirements.md` "save the history as a JSON file, periodically") — the server
+`docs/requirements.md` "save the history as a JSON file, periodically") — the server
 writes a checkpoint. Per the review decision (§11-Q3), the checkpoint stores only
 the **active (unacknowledged) tail plus a running summary**, not the full settled
 history:
@@ -154,7 +154,7 @@ trigger.
    position (rather than a bare boolean) lets the server confirm the replay
    answers the recovery it asked for and ignore a stale replay from an earlier
    round. This is exactly the "encode multiple requests and responses as message
-   history in a single request body" from `requirements.md`.
+   history in a single request body" from `docs/requirements.md`.
 4. **Rebuild.** The server ingests the replay: it appends the replayed events to
    its committed history in order (advancing `history_hash` and `committed_upto`).
    An `R<seq>` with no replayed `r<seq>` is an unanswered request the client is

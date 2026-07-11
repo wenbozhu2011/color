@@ -1,8 +1,8 @@
 # Verification Harness — Plan and Implementation Notes
 
-This is the Phase I self-contained prototype (milestone 3 of `docs/plan.md` §6):
+This is the Phase I self-contained prototype (milestone 3 of `docs/claude/plan.md` §6):
 it runs the transport-agnostic **Color core** over a **simulated lossy network**
-and asserts the safety/liveness properties of `spec.md` / `docs/protocol.md` on
+and asserts the safety/liveness properties of `docs/spec.md` / `docs/claude/protocol.md` on
 seeded, reproducible runs. No external dependencies — pure C++17 + CMake — so it
 builds and runs anywhere. The same core later runs over the real
 libcurl ↔ net_http transport (milestones 4–5).
@@ -15,8 +15,10 @@ src/core/                   transport-agnostic Color core (compiled library)
   color_history.h/.cc         committed history + rolling hash (§4, §7)
   color_client.h/.cc          ColorClient state machine (§5)
   color_server.h/.cc          ColorServer state machine (§6)
+docs/claude/
+  verification-plan.md        this document
 verification/
-  plan.md                     this document
+  readme.md                   build & run instructions
   src/
     sim_network.h             SimLink: seeded drop / duplicate / delay / reorder
     checker.h                 invariant checker (safety + liveness + bounds)
@@ -70,7 +72,7 @@ points. At each, it rebuilds the server from the last **checkpoint** (refreshed
 every `--ckpt-interval` steps, so it lags the crash) and keeps driving the **same
 client** against it. A lagged checkpoint means the new server is missing recent
 history, so the client's next request triggers the `503`/replay recovery
-(`docs/failover.md`): the harness builds the replay from the client and ingests
+(`docs/claude/failover.md`): the harness builds the replay from the client and ingests
 it, and the conversation continues. Because a rebuilt server retains only the
 post-checkpoint suffix of the history, safety across a failover is checked by
 **final history-hash agreement** (`client.cur_hash == server.cur_hash`) plus the
@@ -141,7 +143,7 @@ Exit code is non-zero if any run fails, so it is CI-friendly.
 
 ## Notes / deviations
 
-- **Hash function.** `docs/protocol.md` §7 specifies SHA-256 chaining; the
+- **Hash function.** `docs/claude/protocol.md` §7 specifies SHA-256 chaining; the
   prototype uses a 64-bit FNV-1a-based chain of identical *structure*
   (`h_k = Hash(h_{k-1}, token_k)`) to stay dependency-free. Because the checker
   also deep-compares the full histories, the hash is a fast early detector, not

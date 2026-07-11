@@ -1,15 +1,15 @@
 # Color — Project Plan and Shared Understanding
 
 Status: **REVIEWED — all decisions incorporated; awaiting final sign-off.**
-This document summarizes my understanding of the problem (`spec.md`) and the
-implementation requirements (`requirements.md`), updated with the review
+This document summarizes my understanding of the problem (`docs/spec.md`) and the
+implementation requirements (`docs/requirements.md`), updated with the review
 answers. The former "open design questions" (Q1–Q5) are resolved as **D1–D6**
-below and become the inputs to `docs/protocol.md`; the demo mechanism (§8) is
+below and become the inputs to `docs/claude/protocol.md`; the demo mechanism (§8) is
 also decided. No open items remain — see §9 for the consolidated outcome.
 
 ---
 
-## 1. What Color is (problem definition, from `spec.md`)
+## 1. What Color is (problem definition, from `docs/spec.md`)
 
 **Color is a REST/stateless-RPC protocol that supports a stateful, ordered
 "conversation" between a single client and a single logical server endpoint.**
@@ -73,7 +73,7 @@ while still giving the application a well-defined, ordered message history.
 
 ## 2. Protocol mechanism (high-level sketch — details go in `protocol.md`)
 
-From `requirements.md` §"REST protocol design", the wire mechanism rests on
+From `docs/requirements.md` §"REST protocol design", the wire mechanism rests on
 three header ideas. I'll flesh these out in `protocol.md`; here I just record
 the intent so we agree on the skeleton:
 
@@ -100,7 +100,7 @@ the S-invariant.
 ### Resolved design decisions (from review round 1)
 
 These were the open questions Q1–Q5; the review settled them as follows. They
-are the inputs `docs/protocol.md` must formalize and prove.
+are the inputs `docs/claude/protocol.md` must formalize and prove.
 
 - **D1. Acknowledgement encoding (was Q1).** The client sends an **acknowledgement
   array**: a **`base` id** meaning *"all responses with id < base have been
@@ -151,39 +151,39 @@ are the inputs `docs/protocol.md` must formalize and prove.
 
 ---
 
-## 3. Deliverables and repository layout (from `requirements.md`)
+## 3. Deliverables and repository layout (from `docs/requirements.md`)
 
 Requirements reference paths under `color/...`; since this repo *is* `color`,
 I read those as repo-root paths. Proposed layout:
 
+The layout as built (the design docs were later collected under `docs/claude/`;
+the per-component `plan.md` files were consolidated into these):
+
 ```
 docs/
-  spec.md            # problem definition (exists)
-  requirements.md    # implementation requirements (exists)
-  plan.md            # THIS document
-  protocol.md        # Phase I REST protocol design (to write)
-  failover.md        # Phase II failover protocol design (to write)
-client/
-  plan.md            # client implementation plan
-  src/               # libcurl-based client + failure-injection wrapper
-server/
-  plan.md            # server framework implementation plan
-  src/               # Color as a net_http interceptor-based C++ library
-verification/
-  plan.md            # verification harness plan
-  src/               # fuzzy client/server driver + correctness checker
+  spec.md                 # problem definition (given)
+  requirements.md         # implementation requirements (given)
+  claude/                 # Claude-generated design & plan docs
+    plan.md               # THIS document
+    protocol.md           # Phase I REST protocol design
+    failover.md           # Phase II failover protocol design
+    verification-plan.md  # verification harness plan
+src/
+  core/                   # transport-agnostic Color core (library)
+  wire/                   # failover JSON (checkpoint file + replay body)
+  client/                 # libcurl client transport + failure injection (library)
+  server/                 # Color as a net_http interceptor (library)
 demo/
-  plan.md            # demo plan
-  src/               # slowed-down, event-printing demo built on the fuzzer
-  readme.md          # install/build/run instructions (cmake only)
+  src/                    # runnable color_client + color_server
+  readme.md               # build/run the demo (cmake only)
+verification/
+  src/                    # fuzzy driver + simulated lossy network + checker
+  readme.md               # build/run the verification
 ```
-
-(If you'd prefer everything nested under a `color/` subdirectory instead of
-repo-root, tell me and I'll adjust.)
 
 ---
 
-## 4. Component requirements (from `requirements.md`)
+## 4. Component requirements (from `docs/requirements.md`)
 
 ### Client
 - libcurl as the HTTP client.
@@ -207,7 +207,7 @@ repo-root, tell me and I'll adjust.)
 - A fuzzy client/server driver: client request = timestamp (+ optional random
   nonce); server reply = its own timestamp payload.
 - Requests/responses dropped or duplicated randomly.
-- Check the `spec.md` correctness properties; compare per-side history via the
+- Check the `docs/spec.md` correctness properties; compare per-side history via the
   hash-carried-on-each-message scheme (**D5**).
 - Run up to ~5 min. **Client and server run locally on the same VM** (confirmed
   in review — no cross-machine setup); optionally inject server processing delay.
@@ -219,7 +219,7 @@ repo-root, tell me and I'll adjust.)
 - Transport/mechanism decided — see §8.
 
 ### Phase II — Failover
-- Protocol design in `docs/failover.md`, including the **logical data structure
+- Protocol design in `docs/claude/failover.md`, including the **logical data structure
   for checkpointing** the request/response history on the server.
 - Persist history to a local JSON file, periodically.
 - Server quits/restarts (possibly simulated); the new server reads the history.
@@ -263,7 +263,7 @@ approach, and client + server run **locally on the same VM**.
 
 1. ✅ **This plan** — understanding, layout, dependency approach (§5), demo (§8)
    all reviewed and confirmed. *(commits 5ee870f → 7fc3f3b)*
-2. ✅ **`docs/protocol.md`** — Phase I wire format, headers, ordering rule, and
+2. ✅ **`docs/claude/protocol.md`** — Phase I wire format, headers, ordering rule, and
    the D1–D6 safety-property argument; revised per review (headers-only,
    version dropped, spec-gap §0, `Color-Hash` optional). *(f221ff0 → 4983b08)*
 3. ✅ **Prototype skeleton** — transport-agnostic Color core
@@ -272,7 +272,7 @@ approach, and client + server run **locally on the same VM**.
    liveness properties on seeded, reproducible runs; the checker is itself
    validated by a negative test. Requests arrive as a **Poisson process**
    (stochastic arrivals, capped by the flow-control window) so the interleavings
-   are genuinely varied. See `verification/plan.md`; build/run in
+   are genuinely varied. See `docs/claude/verification-plan.md`; build/run in
    `verification/readme.md`.
    - Status: **100/100 seeds pass** at default settings (~98k requests through
      ~154k drops + ~36k duplicates); passes under `--drop 0.8`; buffers stay
@@ -311,9 +311,9 @@ approach, and client + server run **locally on the same VM**.
      server / failover-is-Phase-II caveats.
    - Run-verified in this environment (e.g. 40 messages × 4 parallel senders,
      40% drop both ways, `--hash` → 0 mismatches). ← **done**
-6. ✅ **`docs/failover.md` + Phase II** — failover complete (protocol, core,
+6. ✅ **`docs/claude/failover.md` + Phase II** — failover complete (protocol, core,
    verification, real transport, and demo).
-   - ✅ `docs/failover.md` — the failover protocol (503/replay recovery; client
+   - ✅ `docs/claude/failover.md` — the failover protocol (503/replay recovery; client
      core algorithm unchanged).
    - ✅ **Core failover support** — `ColorServer` checkpoint save/restore,
      recovery detection + `ingest_replay`; `ColorClient` response retention +
@@ -368,7 +368,7 @@ client-side-only failure injection via the libcurl wrapper.**
 - **Failures are client-side only.** All fault injection happens in the
   **libcurl wrapper** (randomly drop the outgoing request or the incoming
   response), which triggers an immediate transport-level HTTP retry. The
-  net_http server injects no failures; per `requirements.md` this is sufficient
+  net_http server injects no failures; per `docs/requirements.md` this is sufficient
   to exercise every protocol path.
 - **Demo behaviour.** Slow the request rate (e.g. ~1/sec), run non-stop, and
   print a readable per-message event log on **both** client and server showing:
@@ -396,5 +396,5 @@ Implication: the **demo** depends on the real libcurl + net_http build
 - §8 demo decided: real-transport, same VM, manually runnable, client-side-only
   failure injection via the libcurl wrapper.
 - **No open items remain.** Pending your final review of this plan, the next
-  step is to write **`docs/protocol.md`** formalizing D1–D6, including the
+  step is to write **`docs/claude/protocol.md`** formalizing D1–D6, including the
   §2/D6 total-order proof.

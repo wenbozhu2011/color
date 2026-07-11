@@ -2,9 +2,9 @@
 
 Status: **DRAFT for review.** This document formalizes the Phase I ("basic
 version", no failover) Color protocol, turning the decisions **D1–D6** recorded
-in `docs/plan.md` into a concrete wire format, client/server behaviour, worked
+in `docs/claude/plan.md` into a concrete wire format, client/server behaviour, worked
 HTTP examples, and a proof of the core safety invariant. Phase II failover is
-out of scope here (see the forward pointer in §12 and, later, `docs/failover.md`).
+out of scope here (see the forward pointer in §12 and, later, `docs/claude/failover.md`).
 
 Reviewer's eye, please, on the **§11.1 receive-order refinement** — it is the
 one place the design goes beyond the literal D1 encoding, and it is the crux of
@@ -12,7 +12,7 @@ the D6 proof.
 
 ## Contents
 
-0. Where this design corrects or extends `spec.md`
+0. Where this design corrects or extends `docs/spec.md`
 1. Terminology and identifiers
 2. HTTP mapping and header summary
 3. The three mechanisms (id, acknowledgement, history hash)
@@ -28,12 +28,12 @@ the D6 proof.
 
 ---
 
-## 0. Where this design corrects or extends `spec.md`
+## 0. Where this design corrects or extends `docs/spec.md`
 
-Two points where `spec.md` is either inaccurate or silent. Both are
+Two points where `docs/spec.md` is either inaccurate or silent. Both are
 load-bearing for correctness, so they are called out up front.
 
-1. **Response acknowledgement must convey *order*, not just a set.** `spec.md`
+1. **Response acknowledgement must convey *order*, not just a set.** `docs/spec.md`
    states that the ordering of received responses is significant (its property 3
    / S4), yet the "sequence of responses known to the client" it describes reads
    as a *set* of ids. A set cannot express the order in which the client
@@ -44,13 +44,13 @@ load-bearing for correctness, so they are called out up front.
    jointly-acknowledged responses differently and the single-total-order
    invariant would break.
 
-2. **Duplicated messages, not just lost ones.** `spec.md` §5 frames failures as
+2. **Duplicated messages, not just lost ones.** `docs/spec.md` §5 frames failures as
    *loss* only ("requests or responses may be lost … the client will retry"). It
    does not mention that retries and the network also cause **duplicate
    delivery** of requests (and responses). The protocol must be idempotent under
    duplication: the server dedups requests by `Color-Seq` and never reprocesses
    (S5), and the client ignores duplicate responses. The verification harness
-   deliberately **duplicates** messages (per `requirements.md`), so this is a
+   deliberately **duplicates** messages (per `docs/requirements.md`), so this is a
    first-class case here, not an afterthought.
 
 ---
@@ -633,7 +633,7 @@ acknowledged that response), so the reply is harmlessly discarded.
 
 ## 12. Forward pointer to Phase II (failover)
 
-Phase II (`docs/failover.md`) adds server failover while keeping the client's
+Phase II (`docs/claude/failover.md`) adds server failover while keeping the client's
 **core algorithm unchanged** — it keeps assigning ids, acknowledging, and
 retransmitting exactly as above. The server periodically checkpoints its
 committed message history (note `Color-Ack-Base` is already the compact form of
@@ -645,4 +645,4 @@ request acknowledging history it lacks, it returns a `5xx`, and the client
 resends its known request/response history (a JSON-enveloped replay) so the
 server can rebuild the exact history. Steady-state wire rules above are
 unchanged; the replay is the only addition, and it does not alter the core
-conversational algorithm. See `docs/failover.md`.
+conversational algorithm. See `docs/claude/failover.md`.
