@@ -30,6 +30,7 @@ long now_ms() {
 }  // namespace
 
 int main(int argc, char** argv) {
+  setvbuf(stdout, nullptr, _IOLBF, 0);  // line-buffer so redirected logs flush
   int port = 8080;
   int threads = 4;
   std::string uri = "/color";
@@ -70,6 +71,11 @@ int main(int argc, char** argv) {
                   payload.c_str());
     });
   }
+  color.on_hash_mismatch([](color::Seq seq, color::Hash got, color::Hash exp) {
+    std::printf("  [HASH MISMATCH] seq=%llu got=%llu expected=%llu\n",
+                (unsigned long long)seq, (unsigned long long)got,
+                (unsigned long long)exp);
+  });
   color.Register(server.get(), uri);
 
   if (!server->StartAcceptingRequests()) {

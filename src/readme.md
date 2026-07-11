@@ -10,56 +10,52 @@ simulated network also runs over real HTTP:
   framework-level library that makes a plain echo endpoint speak Color,
   transparent to the application handler.
 
-Both are intended to run on the same machine (loopback).
+Both run on the same machine (loopback). **CMake only** — `net_http` and Abseil
+are fetched and compiled automatically (`FetchContent`); no Bazel needed.
 
-## Client (builds with just libcurl)
+## Prerequisites (Debian/Ubuntu)
 
 ```sh
-sudo apt-get install -y libcurl4-openssl-dev      # Debian/Ubuntu
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
-./build/src/client/color_client --url http://127.0.0.1:8080/color \
-    --count 20 --interval-ms 1000 --drop 0.3 --drop-resp 0.3
+sudo apt-get update
+sudo apt-get install -y git cmake g++ pkg-config \
+    libcurl4-openssl-dev libevent-dev zlib1g-dev
 ```
 
-Client options: `--url`, `--count`, `--interval-ms`, `--parallel`,
-`--drop` (request-drop prob), `--drop-resp` (response-drop prob), `--seed`,
-`--hash` (send the optional verification hash), `--quiet`.
+- `libcurl` → the client. `libevent` + `zlib` → the net_http server backend.
+- `git` is needed at configure time: FetchContent pulls net_http and Abseil.
 
-## Server (requires net_http)
-
-`net_http` (`wenbozhu2011/net_http`, branch `server_interceptor`) is a Bazel
-project and pulls in abseil + libevent, so it is not built by this repo's CMake.
-Build/stage it, then point this build at it:
+## Build
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-    -DNET_HTTP_ROOT=/path/to/net_http \
-    -DNET_HTTP_INCLUDE_DIRS="/path/to/abseil/include" \
-    -DNET_HTTP_LIBS="/path/to/libnet_http.a;/path/to/libabsl_strings.a;event;pthread"
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release   # first run fetches net_http+abseil
 cmake --build build -j
-./build/src/server/color_server --port 8080 --uri /color --threads 4
 ```
 
-- `NET_HTTP_ROOT` — directory that contains the `net_http/` header tree (so
-  `#include "net_http/server/public/httpserver.h"` resolves).
-- `NET_HTTP_INCLUDE_DIRS` — extra include dirs (abseil, …).
-- `NET_HTTP_LIBS` — the link libraries (net_http, the abseil libs it uses,
-  `event`, `pthread`).
+This builds `color_client` (if libcurl is found) and `color_server` (if libevent
+is found). To skip the server: `-DCOLOR_BUILD_SERVER=OFF`.
 
-When `NET_HTTP_ROOT` is unset, the server target is skipped and the rest of the
-repo still builds.
-
-Server options: `--port`, `--threads`, `--uri`, `--hash`, `--quiet`.
-
-## Run them together (same VM)
+## Run (same VM)
 
 ```sh
-./build/src/server/color_server --port 8080 &          # terminal 1
+# Terminal 1 — the server (one process == one conversation).
+./build/src/server/color_server --port 8080 --uri /color --hash
+
+# Terminal 2 — the client, injecting drops on both directions.
 ./build/src/client/color_client --url http://127.0.0.1:8080/color \
-    --count 30 --interval-ms 1000 --drop 0.3 --drop-resp 0.3   # terminal 2
+    --count 30 --interval-ms 1000 --drop 0.3 --drop-resp 0.3 --hash
 ```
 
 Watch the client retransmit through dropped messages while the conversation
-still advances in order. For the failover demo, kill and restart the server on
-the same port — the client keeps retrying, unaware.
+still advances in order. With `--hash` on both sides, every reply's history hash
+is cross-checked; a clean run reports `hash mismatches=0`.
+
+> One server process is one conversation. Point a fresh client (seq restarts at
+> 1) at an already-used server and its early requests look like duplicate
+> retries of the old conversation. For the Phase II failover demo you restart
+> the *server* (which reloads its checkpoint), never the client.
+
+### Options
+
+Client: `--url`, `--count`, `--interval-ms`, `--parallel`, `--drop`,
+`--drop-resp`, `--seed`, `--hash`, `--quiet`.
+Server: `--port`, `--threads`, `--uri`, `--hash`, `--quiet`.

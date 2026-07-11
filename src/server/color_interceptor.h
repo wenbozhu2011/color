@@ -40,6 +40,9 @@ class ColorInterceptor {
   void Register(net_http::HTTPServerInterface* server, const std::string& uri);
 
   void on_committed(EventFn fn) { on_committed_ = std::move(fn); }
+  void on_hash_mismatch(ColorServer::HashMismatchFn fn) {
+    core_.on_hash_mismatch(std::move(fn));
+  }
 
  private:
   net_http::InterceptResult OnRequest(net_http::ServerRequestInterface* req);

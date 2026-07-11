@@ -45,6 +45,7 @@ const char* inj_str(color::Injected i) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  setvbuf(stdout, nullptr, _IOLBF, 0);  // line-buffer so redirected logs flush
   Config c;
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
@@ -74,6 +75,13 @@ int main(int argc, char** argv) {
                   payload.c_str());
   };
   color::ColorHttpClient client(c.url, &transport, on_deliver, c.set_hash);
+  std::atomic<int> mismatches{0};
+  client.on_hash_mismatch([&](color::Seq seq, color::Hash got, color::Hash exp) {
+    ++mismatches;
+    std::printf("  [HASH MISMATCH] seq=%llu got=%llu expected=%llu\n",
+                (unsigned long long)seq, (unsigned long long)got,
+                (unsigned long long)exp);
+  });
   client.on_attempt([&](const color::ColorHttpClient::AttemptInfo& a) {
     if (!c.quiet && (a.injected != color::Injected::kNone || a.attempt > 1))
       std::printf("  [send] seq=%llu  attempt=%d  %s%s\n",
@@ -100,6 +108,7 @@ int main(int argc, char** argv) {
   for (int i = 0; i < c.parallel; ++i) pool.emplace_back(worker);
   for (auto& t : pool) t.join();
 
-  std::printf("done: %d messages exchanged\n", c.count);
-  return 0;
+  std::printf("done: %d messages exchanged, hash mismatches=%d\n", c.count,
+              mismatches.load());
+  return mismatches.load() == 0 ? 0 : 1;
 }

@@ -35,6 +35,9 @@ class ColorHttpClient {
                   DeliverFn on_deliver = {}, bool set_hash = false);
 
   void on_attempt(AttemptFn fn) { on_attempt_ = std::move(fn); }
+  void on_hash_mismatch(ColorClient::HashMismatchFn fn) {
+    core_.on_hash_mismatch(std::move(fn));
+  }
 
   // Generate the next request for `payload` and block, retransmitting on any
   // drop/error, until its response is received. `retry_delay_ms` paces retries.

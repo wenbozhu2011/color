@@ -285,13 +285,18 @@ approach, and client + server run **locally on the same VM**.
      and completes every message with correct `Color-Seq` round-trip).
    - `src/server/` — Color as a **net_http request interceptor** (reusable
      framework library) driving the server core; parks out-of-order requests and
-     completes replies in committed order. Written against the real
-     `server_interceptor` interceptor API; **build requires net_http + abseil +
-     libevent**, which are not present in this environment, so it is build-only
-     here (guarded behind `-DNET_HTTP_ROOT`). See `src/readme.md`.
+     completes replies in committed order. **Builds via CMake only** —
+     `cmake/BuildNetHttp.cmake` compiles the net_http fork (`server_interceptor`
+     branch) and abseil are pulled in by FetchContent; libevent + zlib are
+     system deps. **Build- and run-verified in this environment.**
+   - **End-to-end verified:** fresh `color_server` + `color_client`, 40 messages
+     across 4 parallel senders with 40% drop on both directions and `--hash` on
+     — completes with **0 history-hash mismatches** on both client and server
+     (exercises out-of-order holding, in-order commit, exactly-once, and history
+     agreement over real HTTP).
    - CMake builds `color_client` when libcurl is found and `color_server` when
-     `NET_HTTP_ROOT` is set; the core/verification build is unaffected. ← **done
-     (client run-verified; server API-verified, build pending net_http)**
+     libevent is found (`-DCOLOR_BUILD_SERVER=OFF` to skip); the core/
+     verification build is unaffected. See `src/readme.md`. ← **done**
 5. ⬜ **Demo** — slowed, event-printing run over the real transport +
    `demo/readme.md` (mechanism per §8). *(the `--verbose` event trace in the
    harness is the basis for this.)*

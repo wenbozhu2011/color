@@ -1,12 +1,13 @@
-# Color — top-level build.
+# Color — top-level build (CMake only).
 #
 # Builds the transport-agnostic Color core and the verification harness (fuzzy
 # driver over a simulated lossy network). The real transports build behind the
 # same core when their dependencies are present:
 #   - color_client (src/client) builds if libcurl is found.
-#   - color_server (src/server) builds if -DNET_HTTP_ROOT=... points at a
-#     net_http source/build tree (abseil + libevent are transitive deps).
-cmake_minimum_required(VERSION 3.16)
+#   - color_server (src/server) builds if libevent + zlib are found; net_http and
+#     abseil are pulled in automatically via FetchContent (needs network on the
+#     first configure). Disable with -DCOLOR_BUILD_SERVER=OFF.
+cmake_minimum_required(VERSION 3.19)
 project(color CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -41,13 +42,36 @@ else()
                  "Install libcurl dev headers to build the real client.")
 endif()
 
-# Server: net_http (plus abseil + libevent, its transitive deps). net_http is a
-# bazel project, so point NET_HTTP_ROOT at a tree that contains its headers
-# (the directory holding net_http/) and provide the link libraries in
-# NET_HTTP_LIBS (and any extra include dirs, e.g. abseil, in NET_HTTP_INCLUDE_DIRS).
-if(DEFINED NET_HTTP_ROOT)
+# Server: net_http (Bazel-only) compiled via cmake/BuildNetHttp.cmake, with
+# abseil fetched by FetchContent. libevent + zlib must be installed. Auto-on
+# when libevent is available; override with -DCOLOR_BUILD_SERVER=ON/OFF.
+option(COLOR_BUILD_SERVER "Build the net_http Color server" ON)
+find_package(PkgConfig QUIET)
+set(_have_libevent FALSE)
+if(PkgConfig_FOUND)
+  pkg_check_modules(LIBEVENT QUIET IMPORTED_TARGET libevent libevent_pthreads)
+  if(LIBEVENT_FOUND)
+    set(_have_libevent TRUE)
+  endif()
+endif()
+
+if(COLOR_BUILD_SERVER AND _have_libevent)
+  find_package(ZLIB REQUIRED)
+  find_package(Threads REQUIRED)
+
+  include(FetchContent)
+  set(ABSL_PROPAGATE_CXX_STD ON)
+  set(ABSL_ENABLE_INSTALL OFF)
+  FetchContent_Declare(
+    absl
+    GIT_REPOSITORY https://github.com/abseil/abseil-cpp.git
+    GIT_TAG        20240722.0)
+  FetchContent_MakeAvailable(absl)
+
+  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuildNetHttp.cmake)
   add_subdirectory(src/server)
 else()
-  message(STATUS "NET_HTTP_ROOT not set; skipping color_server. "
-                 "Set -DNET_HTTP_ROOT=/path/to/net_http (see src/readme.md).")
+  message(STATUS "Skipping color_server "
+                 "(COLOR_BUILD_SERVER=${COLOR_BUILD_SERVER}, libevent found=${_have_libevent}). "
+                 "Install libevent-dev + zlib1g-dev to build it; see src/readme.md.")
 endif()
