@@ -137,10 +137,14 @@ trigger.
    `seq` from which it needs history. This is the only new status the client must
    recognise.
 3. **Replay.** The client resends its **known request/response history from
-   `K+1`** as a single JSON-enveloped **replay request** (`Color-Replay: 1`): the
-   ordered events it knows, with the **response payloads and hashes** it received.
-   This is exactly the "encode multiple requests and responses as message history
-   in a single request body" from `requirements.md`.
+   `K+1`** as a single JSON-enveloped **replay request** whose `Color-Replay`
+   header **echoes the requested start `seq`** (`Color-Replay: <K+1>`, the value
+   from the server's `Color-Recover: from`): the ordered events it knows, with the
+   **response payloads and hashes** it received. Echoing the `seq` (rather than a
+   bare boolean) lets the server confirm the replay answers the recovery it asked
+   for and ignore a stale replay from an earlier recovery round. This is exactly
+   the "encode multiple requests and responses as message history in a single
+   request body" from `requirements.md`.
 4. **Rebuild.** The server ingests the replay: it appends the replayed events to
    its committed history in order, adopting the client's exact response payloads,
    advancing `committed_upto` and `history_hash`, and re-populating the
@@ -295,8 +299,9 @@ larger replay); a shorter interval, the reverse.
 
 - **D1. Recovery signalling → `503`.** The server signals recovery with HTTP
   **`503`** carrying `Color-Recover: from=<seq>`; the client's replay is a POST
-  carrying `Color-Replay: 1` and the JSON envelope of §4. No dedicated status code
-  or endpoint — the marker headers keep it on the existing path.
+  carrying `Color-Replay: <seq>` (the same start `seq`, echoed back rather than a
+  bare boolean) and the JSON envelope of §4. No dedicated status code or endpoint —
+  the marker headers keep it on the existing path.
 - **D2. Replay scope → server-driven.** The server dictates the replay start via
   `Color-Recover: from=<seq>`; the client replays from that `seq`, clamped to what
   it still retains (§10). Minimal replay, server decides how far back it needs.
