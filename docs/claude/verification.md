@@ -16,7 +16,7 @@ src/core/                   transport-agnostic Color core (compiled library)
   color_client.h/.cc          ColorClient state machine (§5)
   color_server.h/.cc          ColorServer state machine (§6)
 docs/claude/
-  verification-plan.md        this document
+  verification.md        this document
 verification/
   readme.md                   build & run instructions
   src/

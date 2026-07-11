@@ -167,7 +167,7 @@ docs/
     plan.md               # THIS document
     protocol.md           # Phase I REST protocol design
     failover.md           # Phase II failover protocol design
-    verification-plan.md  # verification harness plan
+    verification.md  # verification harness plan
 src/
   core/                   # transport-agnostic Color core (library)
   wire/                   # failover JSON (checkpoint file + replay body)
@@ -272,7 +272,7 @@ approach, and client + server run **locally on the same VM**.
    liveness properties on seeded, reproducible runs; the checker is itself
    validated by a negative test. Requests arrive as a **Poisson process**
    (stochastic arrivals, capped by the flow-control window) so the interleavings
-   are genuinely varied. See `docs/claude/verification-plan.md`; build/run in
+   are genuinely varied. See `docs/claude/verification.md`; build/run in
    `verification/readme.md`.
    - Status: **100/100 seeds pass** at default settings (~98k requests through
      ~154k drops + ~36k duplicates); passes under `--drop 0.8`; buffers stay

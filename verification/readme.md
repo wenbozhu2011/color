@@ -52,4 +52,4 @@ Examples:
 ./build/verification/color_verify --seeds 1 --steps 6 --verbose  # watch events
 ```
 
-For what is being checked and why, see `docs/claude/verification-plan.md`.
+For what is being checked and why, see `docs/claude/verification.md`.
