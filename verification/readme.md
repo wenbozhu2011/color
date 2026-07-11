@@ -39,6 +39,7 @@ ctest --test-dir build --output-on-failure
 --parallel P     max requests in flight at once        (default 8)
 --drop f         probability a message is dropped      (default 0.30)
 --dup f          probability a message is duplicated   (default 0.10)
+--failovers N    inject N server crashes/restarts      (default 0)
 --verbose        print a per-message event trace
 ```
 
@@ -47,6 +48,7 @@ Examples:
 ```sh
 ./build/verification/color_verify --seeds 500          # more seeds
 ./build/verification/color_verify --drop 0.8 --dup 0.5 # harsher network
+./build/verification/color_verify --failovers 3        # server failovers
 ./build/verification/color_verify --seeds 1 --steps 6 --verbose  # watch events
 ```
 

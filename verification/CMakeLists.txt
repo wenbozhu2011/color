@@ -10,3 +10,7 @@ add_test(NAME color_verify_smoke
 # A harsher run: high loss + duplication to stress retransmission and dedup.
 add_test(NAME color_verify_lossy
          COMMAND color_verify --seeds 30 --steps 1500 --drop 0.5 --dup 0.3)
+
+# Failover: inject server crashes/restarts (checkpoint + 503/replay recovery).
+add_test(NAME color_verify_failover
+         COMMAND color_verify --seeds 30 --steps 1500 --failovers 3 --drop 0.4)

@@ -12,6 +12,7 @@
 //                [--minutes M] [--verbose]
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -39,6 +40,8 @@ struct Config {
   std::uint64_t rto = 6;  // retransmit timeout in ticks
   double minutes = 0.0;   // if > 0, run seeds until this wall-clock budget
   bool verbose = false;
+  std::uint64_t failovers = 0;      // number of server failovers to inject
+  std::uint64_t ckpt_interval = 40; // steps between server checkpoints
 };
 
 struct RunStats {
@@ -64,13 +67,19 @@ RunStats run_one(std::uint64_t seed, const Config& cfg) {
                     const color::History&) {
     return "srv-ts=" + std::to_string(now) + ";seq=" + std::to_string(seq);
   };
-  color::ColorServer server(app, /*set_hash=*/true);
   color::ColorClient client({}, /*set_hash=*/true);
   auto on_mismatch = [&hash_mismatches](color::Seq, color::Hash, color::Hash) {
     ++hash_mismatches;
   };
-  server.on_hash_mismatch(on_mismatch);
+  // The server is held by pointer so a failover can replace it with a fresh
+  // instance rebuilt from a (possibly lagged) checkpoint. The client object is
+  // never touched across a failover — demonstrating the unchanged core client.
+  auto server = std::make_unique<color::ColorServer>(app, /*set_hash=*/true);
+  server->on_hash_mismatch(on_mismatch);
   client.on_hash_mismatch(on_mismatch);
+
+  color::Checkpoint last_ckpt = server->checkpoint();  // periodically refreshed
+  std::uint64_t failovers_done = 0;
 
   std::unordered_map<color::Seq, std::uint64_t> last_send;
 
@@ -105,9 +114,21 @@ RunStats run_one(std::uint64_t seed, const Config& cfg) {
     for (color::Seq s : client.outstanding()) {
       if (now - last_send[s] >= cfg.rto) send_request(client.frozen(s));
     }
-    // 3. Deliver due requests; server may emit responses.
+    // 3. Deliver due requests; server may emit responses. A recovery signal is
+    //    resolved inline: the client replays its history, the server rebuilds,
+    //    and the request is reprocessed (models the 503 -> replay round trip).
     for (const auto& req : c2s.due(now)) {
-      for (const auto& resp : server.on_request(req)) {
+      auto responses = server->on_request(req);
+      for (int guard = 0; responses.size() == 1 && responses[0].recover &&
+                          guard < 8; ++guard) {
+        color::Replay rp = client.build_replay(responses[0].recover_from);
+        server->ingest_replay(rp);
+        responses = server->on_request(req);
+        if (cfg.verbose)
+          std::printf("  t=%llu  ~RECOVER replay from=%zu (%zu events)\n",
+                      (unsigned long long)now, rp.from, rp.events.size());
+      }
+      for (const auto& resp : responses) {
         s2c.send(now, resp);
         if (cfg.verbose)
           std::printf("  t=%llu  <-RSP seq=%llu%s\n", (unsigned long long)now,
@@ -118,8 +139,28 @@ RunStats run_one(std::uint64_t seed, const Config& cfg) {
     for (const auto& resp : s2c.due(now)) client.on_response(resp);
   };
 
-  // Generation phase.
-  for (std::uint64_t i = 0; i < cfg.gen_steps; ++i, ++now) step(/*generating=*/true);
+  // Failovers are scheduled at evenly spaced points across the generation phase.
+  auto failover_step = [&](std::uint64_t k) {
+    return cfg.gen_steps * (k + 1) / (cfg.failovers + 1);
+  };
+
+  // Generation phase, with periodic checkpoints and scheduled failovers.
+  for (std::uint64_t i = 0; i < cfg.gen_steps; ++i, ++now) {
+    step(/*generating=*/true);
+    // Refresh the checkpoint periodically (so a failover restores a lagged one).
+    if (cfg.ckpt_interval && (i % cfg.ckpt_interval == 0))
+      last_ckpt = server->checkpoint();
+    // Inject a failover: crash, then restart from the last (lagged) checkpoint.
+    if (failovers_done < cfg.failovers && i == failover_step(failovers_done)) {
+      server = std::make_unique<color::ColorServer>(last_ckpt, app, /*set_hash=*/true);
+      server->on_hash_mismatch(on_mismatch);
+      ++failovers_done;
+      if (cfg.verbose)
+        std::printf("  t=%llu  == FAILOVER #%llu (restore committed_upto=%llu)\n",
+                    (unsigned long long)now, (unsigned long long)failovers_done,
+                    (unsigned long long)last_ckpt.committed_upto);
+    }
+  }
 
   // Drain phase: stop generating, keep ticking + retransmitting until every
   // request is answered and both links are empty (bounded by a safety cap).
@@ -135,7 +176,8 @@ RunStats run_one(std::uint64_t seed, const Config& cfg) {
 
   std::size_t bound = 4 * (cfg.parallel + cfg.max_latency) + 16;
   RunStats st;
-  st.result = color::check_run(client, server, hash_mismatches, bound);
+  st.result = color::check_run(client, *server, hash_mismatches, bound,
+                               /*had_failover=*/cfg.failovers > 0);
   st.steps = now;
   st.issued = client.next_seq() - 1;
   st.req_sent = c2s.sent();
@@ -144,8 +186,8 @@ RunStats run_one(std::uint64_t seed, const Config& cfg) {
   st.rsp_sent = s2c.sent();
   st.rsp_dropped = s2c.dropped();
   st.rsp_dup = s2c.duplicated();
-  st.max_resp_buffer = server.max_resp_buffer();
-  st.max_pending = server.max_pending();
+  st.max_resp_buffer = server->max_resp_buffer();
+  st.max_pending = server->max_pending();
   st.max_ack_new = client.max_ack_new();
   return st;
 }
@@ -165,6 +207,8 @@ Config parse(int argc, char** argv) {
     else if (a == "--max-latency") c.max_latency = (int)val(i);
     else if (a == "--rto") c.rto = (std::uint64_t)val(i);
     else if (a == "--minutes") c.minutes = val(i);
+    else if (a == "--failovers") c.failovers = (std::uint64_t)val(i);
+    else if (a == "--ckpt-interval") c.ckpt_interval = (std::uint64_t)val(i);
     else if (a == "--verbose") c.verbose = true;
     else { std::fprintf(stderr, "unknown arg: %s\n", a.c_str()); std::exit(2); }
   }
@@ -177,10 +221,11 @@ int main(int argc, char** argv) {
   Config cfg = parse(argc, argv);
   std::printf(
       "Color verification: seeds=%llu steps=%llu parallel=%zu rate=%.2f "
-      "drop=%.2f dup=%.2f max_latency=%d rto=%llu%s\n",
+      "drop=%.2f dup=%.2f max_latency=%d rto=%llu failovers=%llu%s\n",
       (unsigned long long)cfg.seeds, (unsigned long long)cfg.gen_steps,
       cfg.parallel, cfg.rate, cfg.drop, cfg.dup, cfg.max_latency,
-      (unsigned long long)cfg.rto, cfg.minutes > 0 ? " (timed)" : "");
+      (unsigned long long)cfg.rto, (unsigned long long)cfg.failovers,
+      cfg.minutes > 0 ? " (timed)" : "");
 
   auto t0 = std::chrono::steady_clock::now();
   std::uint64_t passed = 0, failed = 0, run = 0;

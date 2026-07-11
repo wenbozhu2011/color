@@ -32,12 +32,34 @@ bool ColorClient::on_response(const Response& resp) {
       on_mismatch_(resp.seq, *resp.hash, it->second);
   }
   received_.insert(resp.seq);
-  if (!resp.no_op) pending_new_.push_back(resp.seq);  // record receipt order
+  if (!resp.no_op) {
+    pending_new_.push_back(resp.seq);           // record receipt order
+    received_payload_[resp.seq] = resp.payload;  // retained for replay
+  }
   // Advance the cumulative low-water base over the contiguous received prefix.
   while (received_.count(base_)) ++base_;
   inflight_.erase(resp.seq);  // answered; stop retransmitting
   if (deliver_ && !resp.no_op) deliver_(resp.seq, resp.payload);
   return true;
+}
+
+Replay ColorClient::build_replay(std::size_t from) const {
+  Replay rp;
+  rp.from = from;
+  const auto& ev = history_.events();
+  for (std::size_t i = from; i < ev.size(); ++i) {
+    ReplayEvent re;
+    re.is_response = ev[i].is_response;
+    re.seq = ev[i].seq;
+    if (re.is_response) {
+      auto pit = received_payload_.find(re.seq);
+      if (pit != received_payload_.end()) re.payload = pit->second;
+      auto hit = req_hash_.find(re.seq);
+      if (hit != req_hash_.end()) re.hash = hit->second;
+    }
+    rp.events.push_back(std::move(re));
+  }
+  return rp;
 }
 
 std::vector<Seq> ColorClient::outstanding() const {

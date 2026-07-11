@@ -311,9 +311,21 @@ approach, and client + server run **locally on the same VM**.
      server / failover-is-Phase-II caveats.
    - Run-verified in this environment (e.g. 40 messages × 4 parallel senders,
      40% drop both ways, `--hash` → 0 mismatches). ← **done**
-6. ⬜ **`docs/failover.md` + Phase II** — checkpoint data structure, JSON
-   persistence, restart/replay, re-run verification, failover demo (kill/restart
-   the server on the same port while the client keeps going).
+6. 🔄 **`docs/failover.md` + Phase II** — in progress.
+   - ✅ `docs/failover.md` — the failover protocol (503/replay recovery; client
+     core algorithm unchanged).
+   - ✅ **Core failover support** — `ColorServer` checkpoint save/restore,
+     recovery detection + `ingest_replay`; `ColorClient` response retention +
+     `build_replay` (`src/core/color_checkpoint.h`).
+   - ✅ **Failover verification** — the harness injects crashes and rebuilds from
+     a lagged checkpoint (`--failovers`), driving the same client through the
+     503/replay recovery; safety checked by final history-hash agreement. Passes
+     under heavy loss + multiple failovers; the recovery path has a negative
+     test. `ctest` adds a failover suite.
+   - ⬜ **Real transport** — checkpoint JSON file + `503`/`Color-Recover` and the
+     replay endpoint in the net_http server and libcurl client.
+   - ⬜ **Failover demo** — kill/restart the server on the same port while the
+     client keeps going.
 
 Commit granularity: you direct this as we go; my default is one reviewable slice
 per commit to `main`.

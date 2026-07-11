@@ -34,34 +34,51 @@ struct CheckResult {
 
 // `hash_mismatches` is the count accumulated by the client/server mismatch
 // callbacks during the run. `bound` is the allowed max for buffer/staging/ack.
+// `had_failover` relaxes the checks that a rebuilt server cannot satisfy (it
+// retains only the post-checkpoint suffix of the history and processed only the
+// seqs it committed itself); safety across a failover is proven by hash
+// agreement instead.
 inline CheckResult check_run(const ColorClient& client, const ColorServer& server,
-                             std::uint64_t hash_mismatches, std::size_t bound) {
+                             std::uint64_t hash_mismatches, std::size_t bound,
+                             bool had_failover = false) {
   CheckResult r;
 
-  // SAFETY: server history is an exact prefix of client history.
-  const auto& ch = client.history().events();
-  const auto& sh = server.history().events();
-  r.require(sh.size() <= ch.size(),
-            "server history longer than client history (" +
-                std::to_string(sh.size()) + " > " + std::to_string(ch.size()) + ")");
-  std::size_t common = std::min(sh.size(), ch.size());
-  for (std::size_t i = 0; i < common; ++i) {
-    if (sh[i] != ch[i]) {
-      r.require(false, "history divergence at event " + std::to_string(i) +
-                           ": server=" + sh[i].str() + " client=" + ch[i].str());
-      break;
+  // SAFETY (no failover): server history is an exact prefix of client history.
+  if (!had_failover) {
+    const auto& ch = client.history().events();
+    const auto& sh = server.history().events();
+    r.require(sh.size() <= ch.size(),
+              "server history longer than client history (" +
+                  std::to_string(sh.size()) + " > " + std::to_string(ch.size()) + ")");
+    std::size_t common = std::min(sh.size(), ch.size());
+    for (std::size_t i = 0; i < common; ++i) {
+      if (sh[i] != ch[i]) {
+        r.require(false, "history divergence at event " + std::to_string(i) +
+                             ": server=" + sh[i].str() + " client=" + ch[i].str());
+        break;
+      }
     }
   }
 
-  // HASH: no piggybacked hash ever disagreed.
+  // SAFETY (always): the client and server agree on the final history hash.
+  // This is the authoritative cross-failover safety check — after a replay the
+  // rebuilt server's hash re-converges to the client's.
+  r.require(client.history().cur_hash() == server.history().cur_hash(),
+            "final history hash mismatch (client vs server)");
+
+  // HASH: no piggybacked hash ever disagreed during the run.
   r.require(hash_mismatches == 0,
             "hash mismatches detected: " + std::to_string(hash_mismatches));
 
-  // EXACTLY-ONCE: app invoked exactly once per committed seq 1..committed_upto.
+  // EXACTLY-ONCE: the app ran at most once per seq. Without a failover the app
+  // ran for exactly the committed seqs; a rebuilt server only ran the app for
+  // the seqs it committed itself, so its count is a subset.
   Seq up = server.committed_upto();
-  r.require(server.app_calls().size() == up,
-            "app_calls size " + std::to_string(server.app_calls().size()) +
-                " != committed_upto " + std::to_string(up));
+  if (!had_failover) {
+    r.require(server.app_calls().size() == up,
+              "app_calls size " + std::to_string(server.app_calls().size()) +
+                  " != committed_upto " + std::to_string(up));
+  }
   for (const auto& kv : server.app_calls()) {
     r.require(kv.second == 1, "seq " + std::to_string(kv.first) + " processed " +
                                   std::to_string(kv.second) + " times (want 1)");

@@ -46,12 +46,21 @@ class History {
  public:
   History() : cur_hash_(hash_seed()) {}
 
+  // Resume from a checkpoint: no retained events, but the running hash and the
+  // logical event count continue from `resumed_hash` / `base_count`. Used after
+  // a failover — the settled prefix is folded into the hash, not re-materialized.
+  History(Hash resumed_hash, std::size_t base_count)
+      : cur_hash_(resumed_hash), base_count_(base_count) {}
+
   // Append an event, advancing the rolling hash. Returns the hash *after* this
   // event (i.e. hashmap[event]).
   Hash append(const Event& e);
 
+  // The events physically retained (the full history normally; only the suffix
+  // appended since a resume, after a failover).
   const std::vector<Event>& events() const { return events_; }
-  std::size_t size() const { return events_.size(); }
+  // Logical committed-history length (includes the resumed base count).
+  std::size_t event_count() const { return base_count_ + events_.size(); }
   Hash cur_hash() const { return cur_hash_; }
 
   // Human-readable form, e.g. "R1 r1 R2 R3 r3 r2 R4".
@@ -60,6 +69,7 @@ class History {
  private:
   std::vector<Event> events_;
   Hash cur_hash_;
+  std::size_t base_count_ = 0;
 };
 
 }  // namespace color

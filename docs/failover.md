@@ -133,23 +133,33 @@ trigger.
    history it lacks — `Color-Ack-Base` (or an id in `Color-Ack-New`) names a
    response `seq` it has not committed. It cannot honour the request yet.
 2. **Signal.** The server replies with a **`5xx`** (a dedicated recovery status,
-   e.g. `503` carrying `Color-Recover: from=<K+1>`), telling the client the lowest
-   `seq` from which it needs history. This is the only new status the client must
-   recognise.
-3. **Replay.** The client resends its **known request/response history from
-   `K+1`** as a single JSON-enveloped **replay request** whose `Color-Replay`
-   header **echoes the requested start `seq`** (`Color-Replay: <K+1>`, the value
-   from the server's `Color-Recover: from`): the ordered events it knows, with the
-   **response payloads and hashes** it received. Echoing the `seq` (rather than a
-   bare boolean) lets the server confirm the replay answers the recovery it asked
-   for and ignore a stale replay from an earlier recovery round. This is exactly
-   the "encode multiple requests and responses as message history in a single
-   request body" from `requirements.md`.
+   e.g. `503` carrying `Color-Recover: from=<pos>`), telling the client the
+   **committed-history event index** from which it needs history — i.e. the
+   number of committed events the server holds. This is the only new status the
+   client must recognise.
+
+   *Why an event index, not a `seq`:* a response `r<j>` can be committed late
+   (when a much later request acknowledges it), so it can sit in the history
+   *after* requests with larger seq. A `seq`-based cutoff would drop such an
+   `r<j>` from the replay and the rebuilt order (and hash) would diverge. The
+   first `pos` committed events are identical on both sides, so replaying the
+   **suffix from `pos`** reproduces the server's history in exact order. (This
+   refines the earlier `from=<seq>` wording; the mechanism — server-driven,
+   §11-D2 — is unchanged.)
+3. **Replay.** The client resends the **suffix of its committed history from
+   event index `pos`** as a single JSON-enveloped **replay request** whose
+   `Color-Replay` header **echoes the requested `pos`** (`Color-Replay: <pos>`,
+   the value from the server's `Color-Recover: from`): the ordered events it
+   holds, with the **response payloads and hashes** it received. Echoing the
+   position (rather than a bare boolean) lets the server confirm the replay
+   answers the recovery it asked for and ignore a stale replay from an earlier
+   round. This is exactly the "encode multiple requests and responses as message
+   history in a single request body" from `requirements.md`.
 4. **Rebuild.** The server ingests the replay: it appends the replayed events to
-   its committed history in order, adopting the client's exact response payloads,
-   advancing `committed_upto` and `history_hash`, and re-populating the
-   retransmission buffer for any responses still unacknowledged. It replies `200`
-   to the replay.
+   its committed history in order (advancing `history_hash` and `committed_upto`).
+   An `R<seq>` with no replayed `r<seq>` is an unanswered request the client is
+   still retransmitting; the server marks it *awaiting* and (re)processes it once
+   when that retransmission arrives. It replies `200` to the replay.
 5. **Resume.** The client continues normally — retransmitting still-pending
    requests and issuing new ones. The new server now has the history it needs to
    order and answer them. Steady state is Phase I again.
@@ -158,7 +168,7 @@ Replay envelope (JSON body of the replay request):
 
 ```json
 {
-  "from": 121,
+  "from": 240,
   "events": [
     { "t": "R", "seq": 121 },
     { "t": "r", "seq": 121, "payload": "…", "hash": "0x…" },
@@ -170,9 +180,13 @@ Replay envelope (JSON body of the replay request):
 }
 ```
 
+(`from` is the committed-history event index; the events are the client's history
+suffix starting there, so `seq` values need not be contiguous.)
+
 The replay is **idempotent**: if the server already advanced past part of it (or a
-replay is duplicated by retransmission), the server ignores events at or below its
-current `committed_upto`. A lost replay is simply re-triggered by the next `5xx`.
+replay is duplicated by retransmission), the server ignores events it already
+holds (`event_count > from`). A lost replay is simply re-triggered by the next
+`5xx`.
 
 ---
 
@@ -209,7 +223,7 @@ new server starts on the same port
    ▼
 client request P arrives (ack_base = B)
    ├─ B-1 ≤ K → server already has the referenced history → serve normally
-   └─ B-1 > K → server is missing (K, B-1]  → reply 5xx Color-Recover: from=K+1
+   └─ B-1 > K → server is missing history    → reply 5xx Color-Recover: from=<pos>
             │
             ▼
    client → POST replay envelope (events K+1 … with response payloads)
@@ -298,13 +312,15 @@ larger replay); a shorter interval, the reverse.
 ## 11. Resolved decisions (review)
 
 - **D1. Recovery signalling → `503`.** The server signals recovery with HTTP
-  **`503`** carrying `Color-Recover: from=<seq>`; the client's replay is a POST
-  carrying `Color-Replay: <seq>` (the same start `seq`, echoed back rather than a
+  **`503`** carrying `Color-Recover: from=<pos>`; the client's replay is a POST
+  carrying `Color-Replay: <pos>` (the same position, echoed back rather than a
   bare boolean) and the JSON envelope of §4. No dedicated status code or endpoint —
-  the marker headers keep it on the existing path.
+  the marker headers keep it on the existing path. (`pos` is a committed-history
+  event index — see §4 for why not a `seq`.)
 - **D2. Replay scope → server-driven.** The server dictates the replay start via
-  `Color-Recover: from=<seq>`; the client replays from that `seq`, clamped to what
-  it still retains (§10). Minimal replay, server decides how far back it needs.
+  `Color-Recover: from=<pos>`; the client replays its history suffix from that
+  index, clamped to what it still retains (§10). Minimal replay, server decides
+  how far back it needs.
 - **D3. Checkpoint cadence & scope → as proposed.** Checkpoint on **both** a time
   interval and a commit count, whichever comes first. Persist only the
   **unacknowledged tail** (`buffer[]`) plus `committed_upto` and `history_hash`

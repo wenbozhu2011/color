@@ -16,6 +16,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "color_checkpoint.h"
 #include "color_history.h"
 #include "color_message.h"
 
@@ -41,6 +42,11 @@ class ColorClient {
   // if this was the first receipt of `resp.seq`.
   bool on_response(const Response& resp);
 
+  // Phase II: build the replay a recovering server asked for — the client's
+  // committed history events from index `from`, with received response payloads
+  // (docs/failover.md §4).
+  Replay build_replay(std::size_t from) const;
+
   // ---- transport / driver queries ----
   std::vector<Seq> outstanding() const;
   const Request& frozen(Seq seq) const { return inflight_.at(seq); }
@@ -61,6 +67,7 @@ class ColorClient {
   Seq next_seq_ = 1;
   Seq base_ = 1;
   std::unordered_set<Seq> received_;
+  std::unordered_map<Seq, std::string> received_payload_;  // for replay
   std::vector<Seq> pending_new_;
   std::unordered_map<Seq, Hash> req_hash_;
   std::unordered_map<Seq, Request> inflight_;

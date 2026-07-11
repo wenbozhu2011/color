@@ -63,6 +63,21 @@ ordering bug (server sorting `ack_new`, breaking the receipt order) makes it
 report history divergence at the exact event plus hash mismatches — confirming
 the checks have teeth.
 
+### Failover (Phase II)
+
+With `--failovers N`, the harness injects `N` server crashes at evenly spaced
+points. At each, it rebuilds the server from the last **checkpoint** (refreshed
+every `--ckpt-interval` steps, so it lags the crash) and keeps driving the **same
+client** against it. A lagged checkpoint means the new server is missing recent
+history, so the client's next request triggers the `503`/replay recovery
+(`docs/failover.md`): the harness builds the replay from the client and ingests
+it, and the conversation continues. Because a rebuilt server retains only the
+post-checkpoint suffix of the history, safety across a failover is checked by
+**final history-hash agreement** (`client.cur_hash == server.cur_hash`) plus the
+no-mismatch and bounded checks, rather than the full-event prefix compare. The
+negative test above, run with `--failovers`, also confirms the recovery path is
+policed (a broken replay ingest is caught as a final-hash mismatch).
+
 ### The bounded-buffer check (L2 detail)
 
 The harness asserts every unbounded-looking quantity stays under a single
@@ -108,6 +123,8 @@ Exit code is non-zero if any run fails, so it is CI-friendly.
 --dup f          per-delivery duplication probability (default 0.10)
 --max-latency L  max per-hop delay in ticks; spread => reordering (default 5)
 --rto R          retransmit timeout in ticks (default 6)
+--failovers N    inject N server crashes/restarts (checkpoint + 503/replay)
+--ckpt-interval K  steps between server checkpoints (default 40; lag to recover)
 --minutes M      run seeds until M minutes of wall-clock elapse (requirements
                  ask for up to ~5 min co-located)
 --verbose        print a per-message event trace (also the basis of the demo)

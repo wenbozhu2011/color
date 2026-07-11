@@ -37,6 +37,9 @@ struct Response {
   bool no_op = false;          // true => acknowledgement-only reply (empty body)
                                //   sent when a duplicate request arrives after
                                //   its response was already released
+  bool recover = false;        // Phase II: true => this is a 503 recovery signal
+  std::size_t recover_from = 0;  //   replay committed history from this event
+                               //   index (meaningful only when recover==true)
 };
 
 }  // namespace color
