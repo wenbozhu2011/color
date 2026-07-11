@@ -29,6 +29,7 @@ target_include_directories(color_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/cor
 target_compile_features(color_core PUBLIC cxx_std_17)
 
 enable_testing()
+add_subdirectory(src/wire)
 add_subdirectory(verification)
 
 # ---- Real transports (build only when their dependencies are available) ----

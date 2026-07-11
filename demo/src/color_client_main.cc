@@ -88,6 +88,10 @@ int main(int argc, char** argv) {
                   (unsigned long long)a.seq, a.attempt, inj_str(a.injected),
                   a.delivered ? " (delivered)" : "");
   });
+  client.on_recover([&](std::size_t from, std::size_t events) {
+    std::printf("  [recover] server failed over -> replayed %zu history events "
+                "from index %zu\n", events, from);
+  });
 
   std::atomic<int> next_id{0};
   auto worker = [&]() {
