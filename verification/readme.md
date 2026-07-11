@@ -1,4 +1,4 @@
-# Color verification — build & run
+# Color verification
 
 Proves the Color protocol's safety and liveness by running the client and
 server over a simulated lossy network (drop / duplicate / delay / reorder) and
