@@ -108,14 +108,24 @@ responses" of the requirements. Request ids themselves never have gaps.
 | `Color-Seq` | This request's id `n` (contiguous, monotonic). | D2 |
 | `Color-Ack-Base` | Cumulative low-water `b`: **all responses with id `< b` have been received.** `1` initially. | D1, D4 |
 | `Color-Ack-New` | The **ordered** list of response ids received since the previously-generated request, **in receipt order** (may be empty). This is what conveys the client's receive order to the server. | D1, D6 |
-| `Color-Hash` | The client's running history hash **after committing this request's own token `R<n>`** (i.e. after appending the `Color-Ack-New` responses and then `R<n>`). | D5 |
+| `Color-Hash` *(optional)* | Verification only. The client's running history hash **after committing this request's own token `R<n>`** (i.e. after appending the `Color-Ack-New` responses and then `R<n>`). See "Optional hash" below. | D5 |
 
 ### Response headers
 
 | Header | Meaning | Refs |
 |---|---|---|
 | `Color-Seq` | Echo of the request id `n` this response answers. | D2 |
-| `Color-Hash` | The server's running history hash **after committing `R<n>`** (the prefix ending at the request being answered; the response's own `r<n>` token is not yet committed — see §4/§7). | D5 |
+| `Color-Hash` *(optional)* | Verification only. The server's running history hash **after committing `R<n>`** (the prefix ending at the request being answered; the response's own `r<n>` token is not yet committed — see §4/§7). | D5 |
+
+**Optional hash.** `Color-Hash` is **not** part of the functional protocol — it
+carries no information either side needs to run the conversation, drive ordering,
+release buffers, or achieve exactly-once. It exists purely so the two peers can
+cross-check that their histories agree (the §7 mechanism), which is what the
+verification harness relies on. A plain REST client application therefore **does
+not need to set it**, and either side may ignore it. When absent, the peer simply
+skips the corresponding hash comparison; all safety/liveness properties still
+hold — they just aren't independently self-checked on the wire. The reference
+verification/demo builds do set it, so the harness can detect any divergence.
 
 **Versioning** is intentionally omitted from Phase I for simplicity. A deployment
 that needs to evolve the wire format can add a version header (e.g.
@@ -154,10 +164,13 @@ Color rides on three pieces of metadata. Each maps to a decision from the plan.
    Together they establish the happens-before edges (S4): every response listed
    or covered by request `X` "happened before" `X` was generated.
 
-3. **History hash (`Color-Hash`).** A rolling hash of the committed token
-   sequence, piggybacked on every message, letting the peer verify — cheaply and
-   incrementally — that both sides agree on the history prefix up to a named id.
-   (**D5**, defined precisely in §7.)
+3. **History hash (`Color-Hash`) — optional, verification only.** A rolling hash
+   of the committed token sequence, piggybacked on every message, letting the
+   peer verify — cheaply and incrementally — that both sides agree on the history
+   prefix up to a named id. It is **not required to run the protocol**: ordering,
+   buffer release, and exactly-once all come from mechanisms 1–2. A REST client
+   application need not set it; it exists for the verification harness (and any
+   deployment that wants runtime self-checking). (**D5**, defined precisely in §7.)
 
 ---
 
@@ -261,7 +274,7 @@ transport.send(msg)                            # transport retries on loss
 
 ```
 if i not in received:            # first receipt (ignore duplicate deliveries)
-    assert hs == hashmap[R<i>]   # server agrees on the prefix ending at R<i>
+    if hs present: assert hs == hashmap[R<i>]   # optional: server agrees up to R<i>
     received.add(i)
     pending_new.append(i)        # record receipt order for the next request
     deliver body to the application
@@ -309,7 +322,7 @@ while (committed_upto + 1) in pending_reqs:
     for i in newX:
         append r<i> to history;  cur_hash = Hash(cur_hash, "r"+i);  hashmap[r<i>] = cur_hash
     append R<X> to history;      cur_hash = Hash(cur_hash, "R"+X);  hashmap[R<X>] = cur_hash
-    assert hX == cur_hash            # client/server histories agree up to R<X> (§7)
+    if hX present: assert hX == cur_hash   # optional: histories agree up to R<X> (§7)
     committed_upto = X
     processed[X] = committed
 
@@ -337,6 +350,13 @@ Key points:
 ---
 
 ## 7. History hashing (D5), precisely
+
+This whole mechanism is **optional and for verification only** (see §2, §3): it
+lets each side self-check that the histories agree, but carries nothing the
+protocol needs to function. A REST client that does not verify can omit
+`Color-Hash` entirely, and a receiver treats a missing hash as "no check to
+perform". The reference verification and demo builds enable it so divergence is
+caught at the exact token.
 
 Define a rolling hash over the committed token stream:
 
