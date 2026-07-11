@@ -1,4 +1,4 @@
-// Color core — Phase II failover data structures (transport-agnostic).
+// Color core — failover data structures (transport-agnostic).
 //
 // A `Checkpoint` is the bounded active state a server persists periodically so a
 // replacement process can resume. A `Replay` is the client's known history the
@@ -25,7 +25,7 @@ struct BufferedResponse {
   Hash hash;  // the Color-Hash the server echoes for this seq
 };
 
-// The persisted active state (docs/failover.md §2).
+// The persisted active state a replacement server resumes from.
 struct Checkpoint {
   Seq committed_upto = 0;             // highest committed request seq
   std::size_t event_count = 0;        // committed history length (replay boundary)
@@ -41,10 +41,10 @@ struct ReplayEvent {
   Hash hash = 0;        // echo hash (for r events); informational
 };
 
-// The client's known history from a server-requested position (docs/failover.md
-// §4). `from` is a committed-history event index, not a seq: the first `from`
-// events are identical on both sides, so replaying the suffix rebuilds the
-// server's history in exact order.
+// The client's known history from a server-requested position. `from` is a
+// committed-history event index, not a seq: the first `from` events are
+// identical on both sides, so replaying the suffix rebuilds the server's history
+// in exact order.
 struct Replay {
   std::size_t from = 0;
   std::vector<ReplayEvent> events;

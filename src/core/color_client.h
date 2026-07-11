@@ -42,9 +42,8 @@ class ColorClient {
   // if this was the first receipt of `resp.seq`.
   bool on_response(const Response& resp);
 
-  // Phase II: build the replay a recovering server asked for — the client's
-  // committed history events from index `from`, with received response payloads
-  // (docs/failover.md §4).
+  // Build the replay a recovering server asked for: the client's committed
+  // history events from index `from`, with received response payloads.
   Replay build_replay(std::size_t from) const;
 
   // ---- transport / driver queries ----

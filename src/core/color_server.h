@@ -9,7 +9,7 @@
 // Failover: a server can be built from a Checkpoint (the persisted active
 // state) and, when it detects a request acknowledging history it lacks, asks the
 // client to replay that history (a 503 recovery signal) and rebuilds via
-// ingest_replay(). See docs/failover.md.
+// ingest_replay().
 #ifndef COLOR_COLOR_SERVER_H
 #define COLOR_COLOR_SERVER_H
 
@@ -51,7 +51,7 @@ class ColorServer {
   // ---- failover ----
   // Snapshot the active state for persistence.
   Checkpoint checkpoint() const;
-  // Rebuild committed history/hash from a client replay (docs/failover.md §4).
+  // Rebuild committed history/hash from a client replay.
   void ingest_replay(const Replay& rp);
 
   // ---- checker queries ----
@@ -77,7 +77,7 @@ class ColorServer {
   std::unordered_map<Seq, Hash> req_hash_;
   std::unordered_map<Seq, std::string> resp_buffer_;
   // Replayed requests whose response the client is still missing: (re)process
-  // them once when the client retransmits (docs/failover.md §5, case 1).
+  // them once when the client retransmits.
   std::unordered_set<Seq> awaiting_;
   std::unordered_map<Seq, int> app_calls_;   // seq -> times app invoked
   History history_;
