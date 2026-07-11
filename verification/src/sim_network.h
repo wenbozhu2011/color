@@ -1,10 +1,9 @@
 // Simulated lossy network for the Color verification harness.
 //
 // A directional link between two Color endpoints that, per a seeded RNG, may
-// drop, duplicate, delay, and thereby reorder messages. This is the "simulated
-// transport" of docs/plan.md §5 — the same Color core later runs over real
-// libcurl<->net_http. Loss here stands in for the client-side failure injection
-// of the real system; the client retransmits until a copy gets through.
+// drop, duplicate, delay, and thereby reorder messages. It stands in for a real
+// transport under adverse conditions: loss models the delivery failures the
+// client recovers from by retransmitting until a copy gets through.
 #ifndef COLOR_SIM_NETWORK_H
 #define COLOR_SIM_NETWORK_H
 

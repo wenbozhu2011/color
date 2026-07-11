@@ -1,15 +1,14 @@
 // Correctness checker for the Color verification harness.
 //
-// Verifies, after a fuzzed run, the safety and liveness properties from
-// spec.md / docs/protocol.md:
-//   - SAFETY  : the server's committed history is an exact prefix of the
-//               client's (the single-total-order invariant, §4.2).
-//   - EXACTLY-ONCE : the application ran exactly once per committed seq (S5).
-//   - HASH    : no piggybacked history-hash ever disagreed (§7).
-//   - LIVENESS: after draining, every request got a response and the server
-//               committed all of them (L1).
-//   - BOUNDED : retransmission buffer, staging, and ack size stayed within a
-//               window-derived bound (L2).
+// Verifies, after a fuzzed run, the safety and liveness properties:
+//   - SAFETY       : the server's committed history is an exact prefix of the
+//                    client's (both sides agree on one total order).
+//   - EXACTLY-ONCE : the application ran exactly once per committed seq.
+//   - HASH         : no piggybacked history hash ever disagreed.
+//   - LIVENESS     : after draining, every request got a response and the
+//                    server committed all of them.
+//   - BOUNDED      : retransmission buffer, staging, and ack size stayed within
+//                    a window-derived bound (independent of run length).
 #ifndef COLOR_CHECKER_H
 #define COLOR_CHECKER_H
 

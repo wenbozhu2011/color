@@ -29,12 +29,16 @@ For each seed it constructs a fresh `ColorClient`, `ColorServer`, and two
 `SimLink`s (client→server, server→client), then runs a discrete virtual-time
 loop:
 
-1. **Generate** — keep up to `--parallel` requests outstanding; each request
-   body is a timestamp + nonce (the "fuzzy" payload from `requirements.md`); the
+1. **Generate** — requests arrive as a **Poisson process**: each tick draws
+   `Poisson(--rate)` new requests, capped by the flow-control window
+   `--parallel` (max outstanding). This makes the request interleaving a genuine
+   stochastic process — bursts, gaps, and idle ticks — which matters for the
+   verification to be a meaningful proof rather than exercising a single fixed
+   cadence. Each request body is a timestamp + nonce (the "fuzzy" payload); the
    server replies with its own timestamp.
 2. **Retransmit** — any outstanding request past its `--rto` is resent
    *byte-identically* (the transport-level retry; loss stands in for the real
-   client-side libcurl failure injection).
+   client-side failure injection).
 3. **Deliver requests** — `SimLink` hands due requests to the server, which may
    drop, duplicate, delay, and thereby reorder them; responses go back over the
    return link the same way.
@@ -55,9 +59,31 @@ liveness can be asserted.
 | **Bounded** | L2 | max response buffer, request staging, and `ack_new` size all stay within a window-derived bound (independent of run length) |
 
 The checker is independently validated by a **negative test**: injecting an
-ordering bug (server sorting `ack_new`, breaking the D6 receipt order) makes it
-report history divergence at the exact token plus hash mismatches — confirming
+ordering bug (server sorting `ack_new`, breaking the receipt order) makes it
+report history divergence at the exact event plus hash mismatches — confirming
 the checks have teeth.
+
+### The bounded-buffer check (L2 detail)
+
+The harness asserts every unbounded-looking quantity stays under a single
+constant that depends only on the run *parameters*, never the run *length*:
+
+```
+bound = 4 * (parallel + max_latency) + 16
+```
+
+Rationale: with arrivals capped by the window `--parallel`, at most `parallel`
+requests are outstanding at once, and a message spends at most `max_latency`
+ticks in flight, so the number of responses received-but-not-yet-acknowledged
+(the server response buffer), the out-of-order requests parked awaiting a gap
+(staging), and the responses acknowledged by any single request (`ack_new`) are
+each `O(parallel + max_latency)`. The `4·(…)+16` envelope is a deliberately
+generous constant over that order so the check flags *growth with run length*
+(a genuine leak) without false alarms on normal jitter — it is an empirical
+safety envelope, not a tight analytical bound. Observed worst cases sit far
+below it (e.g. buffer 8, staging 7, `ack_new` 7 at defaults; ~12/11/5 at
+`--rate 20 --parallel 12`). If a future change made a buffer scale with time,
+this check fails; if you tighten the model you can tighten the constant.
 
 ## Build & run
 
@@ -76,7 +102,8 @@ Exit code is non-zero if any run fails, so it is CI-friendly.
 --seeds N        number of seeds (default 100)
 --base-seed S    first seed (runs S..S+N-1; fully reproducible)
 --steps K        generation-phase length in ticks (default 2000)
---parallel P     max outstanding requests (default 8)
+--parallel P     max outstanding requests, the flow-control window (default 8)
+--rate f         mean new requests per tick; Poisson arrivals (default 2.0)
 --drop f         per-copy drop probability (default 0.30)
 --dup f          per-delivery duplication probability (default 0.10)
 --max-latency L  max per-hop delay in ticks; spread => reordering (default 5)

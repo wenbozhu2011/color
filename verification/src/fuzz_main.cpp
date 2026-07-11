@@ -3,12 +3,12 @@
 // Wires a ColorClient and ColorServer together over a simulated lossy network
 // (drop / duplicate / delay / reorder, seeded) and, for each seed, drives a
 // randomized conversation and then asserts the safety & liveness properties via
-// checker.h. This is the artifact that *proves* the Phase I design
-// (docs/protocol.md) deterministically and reproducibly.
+// checker.h. This is the artifact that exercises the protocol deterministically
+// and reproducibly, so a violation shows up as a concrete failing seed.
 //
 // Usage:
 //   color_verify [--seeds N] [--base-seed S] [--steps K] [--parallel P]
-//                [--drop f] [--dup f] [--max-latency L] [--rto R]
+//                [--rate f] [--drop f] [--dup f] [--max-latency L] [--rto R]
 //                [--minutes M] [--verbose]
 #include <chrono>
 #include <cstdint>
@@ -31,7 +31,8 @@ struct Config {
   std::uint64_t seeds = 100;
   std::uint64_t base_seed = 1;
   std::uint64_t gen_steps = 2000;
-  std::size_t parallel = 8;
+  std::size_t parallel = 8;  // max outstanding requests (flow-control window)
+  double rate = 2.0;         // mean new requests per tick (Poisson arrivals)
   double drop = 0.30;
   double dup = 0.10;
   int max_latency = 5;
@@ -73,6 +74,12 @@ RunStats run_one(std::uint64_t seed, const Config& cfg) {
 
   std::unordered_map<color::Seq, std::uint64_t> last_send;
 
+  // Requests arrive as a Poisson process: each tick draws Poisson(rate) new
+  // requests, capped by the flow-control window (`parallel`). This makes the
+  // request interleaving a genuine stochastic process (bursts, gaps, idle
+  // ticks) rather than a fixed cadence.
+  std::poisson_distribution<int> arrivals(cfg.rate);
+
   auto send_request = [&](const color::Request& r) {
     c2s.send(now, r);
     last_send[r.seq] = now;
@@ -83,10 +90,11 @@ RunStats run_one(std::uint64_t seed, const Config& cfg) {
   };
 
   auto step = [&](bool generating) {
-    // 1. Generate up to `parallel` outstanding requests.
+    // 1. Poisson(rate) new requests this tick, capped by the window `parallel`.
     if (generating) {
+      int want = arrivals(rng);
       std::size_t out = client.outstanding().size();
-      while (out < cfg.parallel) {
+      for (int j = 0; j < want && out < cfg.parallel; ++j) {
         std::string p = "cli-ts=" + std::to_string(now) + ";n=" +
                         std::to_string(rng() & 0xffff);
         send_request(client.generate_request(p));
@@ -151,6 +159,7 @@ Config parse(int argc, char** argv) {
     else if (a == "--base-seed") c.base_seed = (std::uint64_t)val(i);
     else if (a == "--steps") c.gen_steps = (std::uint64_t)val(i);
     else if (a == "--parallel") c.parallel = (std::size_t)val(i);
+    else if (a == "--rate") c.rate = val(i);
     else if (a == "--drop") c.drop = val(i);
     else if (a == "--dup") c.dup = val(i);
     else if (a == "--max-latency") c.max_latency = (int)val(i);
@@ -167,10 +176,10 @@ Config parse(int argc, char** argv) {
 int main(int argc, char** argv) {
   Config cfg = parse(argc, argv);
   std::printf(
-      "Color verification: seeds=%llu steps=%llu parallel=%zu drop=%.2f "
-      "dup=%.2f max_latency=%d rto=%llu%s\n",
+      "Color verification: seeds=%llu steps=%llu parallel=%zu rate=%.2f "
+      "drop=%.2f dup=%.2f max_latency=%d rto=%llu%s\n",
       (unsigned long long)cfg.seeds, (unsigned long long)cfg.gen_steps,
-      cfg.parallel, cfg.drop, cfg.dup, cfg.max_latency,
+      cfg.parallel, cfg.rate, cfg.drop, cfg.dup, cfg.max_latency,
       (unsigned long long)cfg.rto, cfg.minutes > 0 ? " (timed)" : "");
 
   auto t0 = std::chrono::steady_clock::now();
