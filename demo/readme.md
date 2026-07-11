@@ -21,6 +21,13 @@ sudo apt-get install -y git cmake g++ pkg-config \
 `git` is needed at configure time: CMake FetchContent pulls net_http (the
 `server_interceptor` fork) and Abseil. **CMake only — no Bazel.**
 
+## Get the source
+
+```sh
+git clone https://github.com/wenbozhu2011/color.git
+cd color
+```
+
 ## Build
 
 ```sh
