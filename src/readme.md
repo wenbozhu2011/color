@@ -1,17 +1,25 @@
-# Color real transport — client & server
+# Color libraries (`src/`)
 
-The same Color core (`src/core/`) that the verification harness exercises over a
-simulated network also runs over real HTTP:
+The transport-agnostic Color core and the two real-HTTP transport libraries that
+build on it. These are libraries only — the runnable client/server programs live
+in `demo/` (see `demo/readme.md` to build and run them).
 
-- **`src/client/`** — a libcurl-based client. A thin wrapper injects delivery
-  failures (drops the request or the response); ordinary transport-level retry
-  re-POSTs the identical request until a reply arrives.
-- **`src/server/`** — Color as a **net_http request interceptor**: a reusable,
-  framework-level library that makes a plain echo endpoint speak Color,
-  transparent to the application handler.
+```
+src/core/     color_core         — transport-agnostic protocol core
+src/client/   color_http_client  — libcurl client transport (CurlTransport)
+src/server/   color_interceptor  — Color as a net_http request interceptor
+```
 
-Both run on the same machine (loopback). **CMake only** — `net_http` and Abseil
-are fetched and compiled automatically (`FetchContent`); no Bazel needed.
+## What builds when
+
+The core always builds. Each transport library builds only when its
+dependencies are present (all handled by the top-level CMake):
+
+| Library | Needs | Notes |
+|---|---|---|
+| `color_core` | C++17 compiler | always built |
+| `color_http_client` | libcurl | built when `find_package(CURL)` succeeds |
+| `color_interceptor` | libevent + zlib | net_http + abseil are fetched via FetchContent; skip with `-DCOLOR_BUILD_SERVER=OFF` |
 
 ## Prerequisites (Debian/Ubuntu)
 
@@ -21,41 +29,17 @@ sudo apt-get install -y git cmake g++ pkg-config \
     libcurl4-openssl-dev libevent-dev zlib1g-dev
 ```
 
-- `libcurl` → the client. `libevent` + `zlib` → the net_http server backend.
-- `git` is needed at configure time: FetchContent pulls net_http and Abseil.
+`git` is needed at configure time — FetchContent pulls net_http (the
+`server_interceptor` fork) and Abseil.
 
-## Build
+## Build the libraries
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release   # first run fetches net_http+abseil
-cmake --build build -j
+cmake --build build --target color_core color_http_client color_interceptor -j
 ```
 
-This builds `color_client` (if libcurl is found) and `color_server` (if libevent
-is found). To skip the server: `-DCOLOR_BUILD_SERVER=OFF`.
-
-## Run (same VM)
-
-```sh
-# Terminal 1 — the server (one process == one conversation).
-./build/src/server/color_server --port 8080 --uri /color --hash
-
-# Terminal 2 — the client, injecting drops on both directions.
-./build/src/client/color_client --url http://127.0.0.1:8080/color \
-    --count 30 --interval-ms 1000 --drop 0.3 --drop-resp 0.3 --hash
-```
-
-Watch the client retransmit through dropped messages while the conversation
-still advances in order. With `--hash` on both sides, every reply's history hash
-is cross-checked; a clean run reports `hash mismatches=0`.
-
-> One server process is one conversation. Point a fresh client (seq restarts at
-> 1) at an already-used server and its early requests look like duplicate
-> retries of the old conversation. For the Phase II failover demo you restart
-> the *server* (which reloads its checkpoint), never the client.
-
-### Options
-
-Client: `--url`, `--count`, `--interval-ms`, `--parallel`, `--drop`,
-`--drop-resp`, `--seed`, `--hash`, `--quiet`.
-Server: `--port`, `--threads`, `--uri`, `--hash`, `--quiet`.
+Link against them from your own code as `color_core`, `color_http_client`, or
+`color_interceptor`; each carries its public include directory and transitive
+dependencies. The verification harness (`verification/`) links `color_core`; the
+demo programs (`demo/`) link `color_http_client` and `color_interceptor`.

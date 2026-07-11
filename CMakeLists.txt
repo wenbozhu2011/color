@@ -75,3 +75,7 @@ else()
                  "(COLOR_BUILD_SERVER=${COLOR_BUILD_SERVER}, libevent found=${_have_libevent}). "
                  "Install libevent-dev + zlib1g-dev to build it; see src/readme.md.")
 endif()
+
+# Runnable client/server programs (the demo). Each target builds only if its
+# transport library above was configured. Added last so those targets exist.
+add_subdirectory(demo/src)

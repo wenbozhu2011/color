@@ -6,7 +6,7 @@
 
 namespace color {
 
-ColorHttpClient::ColorHttpClient(std::string url, FaultHttpTransport* transport,
+ColorHttpClient::ColorHttpClient(std::string url, CurlTransport* transport,
                                  DeliverFn on_deliver, bool set_hash)
     : url_(std::move(url)),
       transport_(transport),

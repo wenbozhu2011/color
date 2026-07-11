@@ -15,7 +15,7 @@
 #include <vector>
 
 #include "color_client.h"
-#include "fault_http_transport.h"
+#include "curl_transport.h"
 
 namespace color {
 
@@ -31,7 +31,7 @@ class ColorHttpClient {
   using DeliverFn = std::function<void(Seq seq, const std::string& payload)>;
   using AttemptFn = std::function<void(const AttemptInfo&)>;
 
-  ColorHttpClient(std::string url, FaultHttpTransport* transport,
+  ColorHttpClient(std::string url, CurlTransport* transport,
                   DeliverFn on_deliver = {}, bool set_hash = false);
 
   void on_attempt(AttemptFn fn) { on_attempt_ = std::move(fn); }
@@ -47,7 +47,7 @@ class ColorHttpClient {
   static std::vector<std::string> header_lines(const Request& r);
 
   std::string url_;
-  FaultHttpTransport* transport_;
+  CurlTransport* transport_;
   AttemptFn on_attempt_;
   std::mutex mu_;
   ColorClient core_;  // guarded by mu_

@@ -1,4 +1,4 @@
-#include "fault_http_transport.h"
+#include "curl_transport.h"
 
 #include <curl/curl.h>
 
@@ -51,9 +51,8 @@ std::size_t write_header(char* ptr, std::size_t size, std::size_t nmemb,
 
 }  // namespace
 
-FaultHttpTransport::FaultHttpTransport(double p_drop_request,
-                                       double p_drop_response,
-                                       std::uint64_t seed, long timeout_ms)
+CurlTransport::CurlTransport(double p_drop_request, double p_drop_response,
+                             std::uint64_t seed, long timeout_ms)
     : p_drop_request_(p_drop_request),
       p_drop_response_(p_drop_response),
       seed_(seed),
@@ -61,9 +60,9 @@ FaultHttpTransport::FaultHttpTransport(double p_drop_request,
   curl_global_init(CURL_GLOBAL_DEFAULT);
 }
 
-FaultHttpTransport::~FaultHttpTransport() { curl_global_cleanup(); }
+CurlTransport::~CurlTransport() { curl_global_cleanup(); }
 
-Injected FaultHttpTransport::roll() {
+Injected CurlTransport::roll() {
   std::uniform_real_distribution<double> u(0.0, 1.0);
   auto& rng = thread_rng(seed_);
   if (u(rng) < p_drop_request_) return Injected::kDropRequest;
@@ -71,7 +70,7 @@ Injected FaultHttpTransport::roll() {
   return Injected::kNone;
 }
 
-HttpResult FaultHttpTransport::post(const std::string& url,
+HttpResult CurlTransport::post(const std::string& url,
                                     const std::vector<std::string>& header_lines,
                                     const std::string& body, Injected* injected) {
   HttpResult res;

@@ -18,7 +18,7 @@
 #include <vector>
 
 #include "color_http_client.h"
-#include "fault_http_transport.h"
+#include "curl_transport.h"
 
 namespace {
 
@@ -67,7 +67,7 @@ int main(int argc, char** argv) {
               c.url.c_str(), c.count, c.interval_ms, c.parallel, c.drop,
               c.drop_resp);
 
-  color::FaultHttpTransport transport(c.drop, c.drop_resp, c.seed);
+  color::CurlTransport transport(c.drop, c.drop_resp, c.seed);
 
   auto on_deliver = [&](color::Seq seq, const std::string& payload) {
     if (!c.quiet)

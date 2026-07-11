@@ -1,12 +1,12 @@
-// A thin libcurl wrapper whose sole added behaviour is failure injection.
+// A thin libcurl POST transport whose sole added behaviour is failure injection.
 //
 // Color needs no "rich client": ordinary HTTP POST with transport-level retry
 // is enough. This wrapper exists only so a test/demo can inject delivery
 // failures on demand — it randomly drops either the outgoing request (the peer
 // never sees it) or the incoming response (the peer processed it, but the reply
 // is discarded). Everything else is a plain libcurl POST.
-#ifndef COLOR_FAULT_HTTP_TRANSPORT_H
-#define COLOR_FAULT_HTTP_TRANSPORT_H
+#ifndef COLOR_CURL_TRANSPORT_H
+#define COLOR_CURL_TRANSPORT_H
 
 #include <cstdint>
 #include <map>
@@ -26,13 +26,13 @@ struct HttpResult {
 // How an attempt failed, for logging.
 enum class Injected { kNone, kDropRequest, kDropResponse };
 
-class FaultHttpTransport {
+class CurlTransport {
  public:
   // p_drop_request / p_drop_response are per-attempt probabilities. seed makes
   // the injection reproducible; each calling thread derives its own stream.
-  FaultHttpTransport(double p_drop_request, double p_drop_response,
-                     std::uint64_t seed, long timeout_ms = 2000);
-  ~FaultHttpTransport();
+  CurlTransport(double p_drop_request, double p_drop_response,
+                std::uint64_t seed, long timeout_ms = 2000);
+  ~CurlTransport();
 
   // POST `body` to `url` with the given "Key: Value" header lines. On an
   // injected drop the request is either not sent (kDropRequest) or sent and its
@@ -53,4 +53,4 @@ class FaultHttpTransport {
 
 }  // namespace color
 
-#endif  // COLOR_FAULT_HTTP_TRANSPORT_H
+#endif  // COLOR_CURL_TRANSPORT_H
