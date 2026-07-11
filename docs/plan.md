@@ -277,8 +277,21 @@ approach, and client + server run **locally on the same VM**.
    - Status: **100/100 seeds pass** at default settings (~98k requests through
      ~154k drops + ~36k duplicates); passes under `--drop 0.8`; buffers stay
      bounded. `ctest` wires a smoke + high-loss suite. ← **done**
-4. ⬜ **Real transport** — libcurl client wrapper + net_http interceptor behind
-   the same core interface (`client/`, `server/`).
+4. ✅ **Real transport (this milestone)** — the same core behind real HTTP:
+   - `src/client/` — libcurl client with a failure-injection wrapper (drops the
+     request or the response); transport-level retry re-POSTs the identical
+     request. **Builds and runs in this environment** (verified end-to-end
+     against a loopback echo server: retransmits through heavy injected drops
+     and completes every message with correct `Color-Seq` round-trip).
+   - `src/server/` — Color as a **net_http request interceptor** (reusable
+     framework library) driving the server core; parks out-of-order requests and
+     completes replies in committed order. Written against the real
+     `server_interceptor` interceptor API; **build requires net_http + abseil +
+     libevent**, which are not present in this environment, so it is build-only
+     here (guarded behind `-DNET_HTTP_ROOT`). See `src/readme.md`.
+   - CMake builds `color_client` when libcurl is found and `color_server` when
+     `NET_HTTP_ROOT` is set; the core/verification build is unaffected. ← **done
+     (client run-verified; server API-verified, build pending net_http)**
 5. ⬜ **Demo** — slowed, event-printing run over the real transport +
    `demo/readme.md` (mechanism per §8). *(the `--verbose` event trace in the
    harness is the basis for this.)*
