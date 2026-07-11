@@ -63,23 +63,27 @@ keeps making progress.
 
 ---
 
-## 2. Server checkpoint (the persisted message history)
+## 2. Server checkpoint (the persisted active state)
 
-Periodically (every `T` ms or every `N` commits — the `requirements.md` "save the
-history as a JSON file, periodically") the server writes a checkpoint of its
-committed message history and the state needed to resume:
+Periodically — every `T` ms **or** every `N` commits, whichever comes first (the
+`requirements.md` "save the history as a JSON file, periodically") — the server
+writes a checkpoint. Per the review decision (§11-Q3), the checkpoint stores only
+the **active (unacknowledged) tail plus a running summary**, not the full settled
+history:
 
 | Field | Meaning |
 |---|---|
 | `committed_upto` | highest `Color-Seq` committed in order at checkpoint time |
-| `history_hash` | running history hash at `committed_upto` |
-| `history[]` | the committed request/response events in order, with response payloads: `{t:"R",seq}` / `{t:"r",seq,payload,hash}` |
-| `buffer_from` | lowest `seq` still unacknowledged (responses `≥` this are retained for retransmission) |
+| `history_hash` | running history hash at the committed frontier — lets the rebuilt history re-converge and continue the `Color-Hash` chain |
+| `buffer[]` | the committed-but-**unacknowledged** responses `{seq, payload, hash}`, retained so the new server can resend them to a client still waiting |
 
-`history[]` carries the **response payloads** because they are the app-visible
-content that must survive; request payloads for already-committed requests are not
-needed (those requests will not be reprocessed). The checkpoint is bounded by the
-active window — see §8.
+The unacknowledged responses **must** be persisted here: the client never received
+them, so it cannot replay them — the server is their only holder (mirror image of
+the *answered* responses, which only the client holds; §3). Everything the client
+has already acknowledged is settled and is compacted away — represented only by
+`committed_upto` + `history_hash`; if the new server turns out to need part of that
+settled or post-checkpoint region, the client replays it (§4). The checkpoint is
+therefore bounded by the active window (§8).
 
 Checkpoint writes are atomic (write-temp-then-rename) so a crash mid-write leaves
 the previous good checkpoint intact.
@@ -91,12 +95,9 @@ JSON layout (prototype):
   "version": 1,
   "committed_upto": 120,
   "history_hash": "0x9f3a1c...",
-  "buffer_from": 118,
-  "history": [
-    { "t": "R", "seq": 119 },
-    { "t": "r", "seq": 119, "payload": "{\"srv_ts\":...}", "hash": "0x7b19..." },
-    { "t": "R", "seq": 120 },
-    { "t": "r", "seq": 120, "payload": "{\"srv_ts\":...}", "hash": "0x4c02..." }
+  "buffer": [
+    { "seq": 118, "payload": "{\"srv_ts\":...}", "hash": "0x7b19..." },
+    { "seq": 120, "payload": "{\"srv_ts\":...}", "hash": "0x4c02..." }
   ]
 }
 ```
@@ -199,7 +200,7 @@ old server: commit … K (checkpoint) … K+1..M, release responses, CRASH
         │        (client keeps sending / retransmitting; connections fail → retried)
         ▼
 new server starts on the same port
-   ├─ load checkpoint → committed_upto = K, history_hash, history[], buffer
+   ├─ load checkpoint → committed_upto = K, history_hash, buffer[] (unacked tail)
    ├─ StartAcceptingRequests
    ▼
 client request P arrives (ack_base = B)
@@ -236,9 +237,9 @@ client request P arrives (ack_base = B)
 
 ## 8. Bounding checkpoint and replay size
 
-Both the checkpoint's `history[]` and the replay envelope need only cover the
-**active window** — from the acknowledged low-water (`Color-Ack-Base`) upward.
-Everything the client has acknowledged is settled on both sides and can be
+The checkpoint (its unacknowledged `buffer[]`) and the replay envelope both cover
+only the **active window** — from the acknowledged low-water (`Color-Ack-Base`)
+upward. Everything the client has acknowledged is settled on both sides and is
 compacted to `committed_upto` + `history_hash`; the client need not retain, and
 need not replay, below that frontier. So both are `O(in-flight window + checkpoint
 lag)`, independent of total conversation length — the same boundedness argument as
@@ -256,10 +257,13 @@ larger replay); a shorter interval, the reverse.
   serialize the `ColorServer` to a checkpoint, discard the post-checkpoint tail to
   model a crash, and reconstruct a **fresh** `ColorServer` from the checkpoint —
   then keep driving the **same** client against it. The client hits the `5xx`,
-  replays, and the run continues; the existing checker must still pass (histories
-  agree by exact prefix, exactly-once holds across the boundary, buffers stay
-  bounded). Because the client object is otherwise untouched, this exercises the
-  §5 recovery step and confirms the core client algorithm is unchanged.
+  replays, and the run continues. Because the new server intentionally does not
+  retain the settled prefix, correctness across the boundary is checked by
+  **history-hash agreement** (the piggybacked `Color-Hash` re-converges after
+  replay), exactly-once holding across the boundary, and bounded buffers; tokens
+  committed after the rebuild are also exact-prefix compared. Because the client
+  object is otherwise untouched, this exercises the §5 recovery step and confirms
+  the core client algorithm is unchanged.
 - **Demo (real transport).** As in `demo/readme.md`: run `color_server` with
   periodic checkpointing to a JSON file; start `color_client`; **kill the server
   and restart it on the same port**; the client's next request triggers the `5xx`,
@@ -287,17 +291,16 @@ larger replay); a shorter interval, the reverse.
 
 ---
 
-## 11. Open questions for review
+## 11. Resolved decisions (review)
 
-- **Q1. Recovery status code / signalling.** Proposed: a `5xx` (e.g. `503`) plus a
-  `Color-Recover: from=<seq>` header and a `Color-Replay: 1` request marker. OK, or
-  do you want a dedicated status code / endpoint for the replay?
-- **Q2. Replay scope.** Replay from the server-requested `from=<seq>` (server-
-  driven, minimal) vs. the client always replaying from its retained low-water
-  (client-driven, simpler)? Proposed: server-driven `from`, client clamps to what
-  it retains.
-- **Q3. Checkpoint cadence & payloads.** Time-based, count-based, or both; and
-  persist full `history[]` payloads (needed so the *server-side* checkpoint alone
-  can answer already-acked retries) vs. only the unacknowledged tail (smaller,
-  relies more on replay). Proposed: both cadences (whichever first); persist the
-  unacknowledged tail plus `history_hash`, recover the rest via replay.
+- **D1. Recovery signalling → `503`.** The server signals recovery with HTTP
+  **`503`** carrying `Color-Recover: from=<seq>`; the client's replay is a POST
+  carrying `Color-Replay: 1` and the JSON envelope of §4. No dedicated status code
+  or endpoint — the marker headers keep it on the existing path.
+- **D2. Replay scope → server-driven.** The server dictates the replay start via
+  `Color-Recover: from=<seq>`; the client replays from that `seq`, clamped to what
+  it still retains (§10). Minimal replay, server decides how far back it needs.
+- **D3. Checkpoint cadence & scope → as proposed.** Checkpoint on **both** a time
+  interval and a commit count, whichever comes first. Persist only the
+  **unacknowledged tail** (`buffer[]`) plus `committed_upto` and `history_hash`
+  (§2); everything else is recovered via replay.
