@@ -1,11 +1,11 @@
 # Color — Project Plan and Shared Understanding
 
-Status: **REVIEWED — decisions incorporated** (review round 1 on commit
-`5ee870f`). This document summarizes my understanding of the problem (`spec.md`)
-and the implementation requirements (`requirements.md`), now updated with the
-answers from the review. The former "open design questions" (Q1–Q5) are resolved
-below and become the inputs to `docs/protocol.md`. One item remains open: the
-**demo mechanism** (§8). See §9 for the consolidated review outcome.
+Status: **REVIEWED — all decisions incorporated; awaiting final sign-off.**
+This document summarizes my understanding of the problem (`spec.md`) and the
+implementation requirements (`requirements.md`), updated with the review
+answers. The former "open design questions" (Q1–Q5) are resolved as **D1–D6**
+below and become the inputs to `docs/protocol.md`; the demo mechanism (§8) is
+also decided. No open items remain — see §9 for the consolidated outcome.
 
 ---
 
@@ -216,7 +216,7 @@ repo-root, tell me and I'll adjust.)
 - Reuse the fuzzer as the demo, but slow the message rate, run continuously, and
   print client/server events to make the protocol legible.
 - `readme.md` with full install/build/run instructions; **cmake only**.
-- **Open item:** exactly which transport the demo drives — see §8.
+- Transport/mechanism decided — see §8.
 
 ### Phase II — Failover
 - Protocol design in `docs/failover.md`, including the **logical data structure
@@ -294,44 +294,49 @@ slice per commit to `main`.
 
 ---
 
-## 8. Demo mechanism — proposal (the one remaining open item)
+## 8. Demo mechanism — DECIDED
 
-Review note: *"Let's go with your proposal. Then we need to figure out how the
-demo would work."* Here's my proposal for confirmation:
+Review outcome: **real-transport demo, on the same VM, manually runnable, with
+client-side-only failure injection via the libcurl wrapper.**
 
-- The **verification harness** runs the Color core over the **simulated
-  transport** (deterministic, seeded, fast) — that's where we *prove*
-  correctness.
-- The **demo** runs the **same Color core over the real transport** (libcurl
-  client ↔ net_http server, HTTP loopback on one VM), because Phase II needs to
-  literally **kill and restart the server process** on the same port — only a
-  real process/socket makes that demonstration meaningful.
-- Demo behaviour: slow the request rate (e.g. ~1/sec), run non-stop, and print a
-  readable per-message event log on **both** client and server showing: request
-  id, the acknowledgement array (`base` + extra ids, per **D1**), whether the
-  request/response was injected-dropped and retried, the resulting ordered
-  history, and the piggybacked history hash (**D5**) with a ✓/✗ match marker.
-- For the **Phase II failover demo**: manually kill the net_http server, restart
-  it on the same port; it reloads the checkpointed JSON history; the libcurl
-  client — still retrying, unaware — resumes; the event log shows the "chat"
-  continuing across the restart, with history hashes still matching.
+- **Split by purpose.** The **verification harness** runs the Color core over
+  the **simulated transport** (deterministic, seeded, fast) — that's where we
+  *prove* correctness. The **demo** runs the **same Color core over the real
+  transport** (libcurl client ↔ net_http server, HTTP loopback on one VM). Both
+  share the identical Color core; only the transport implementation differs.
+- **Manually runnable.** Start the net_http server process and the libcurl
+  client process by hand (documented in `demo/readme.md`, cmake only). No
+  orchestration harness — the operator drives it.
+- **Failures are client-side only.** All fault injection happens in the
+  **libcurl wrapper** (randomly drop the outgoing request or the incoming
+  response), which triggers an immediate transport-level HTTP retry. The
+  net_http server injects no failures; per `requirements.md` this is sufficient
+  to exercise every protocol path.
+- **Demo behaviour.** Slow the request rate (e.g. ~1/sec), run non-stop, and
+  print a readable per-message event log on **both** client and server showing:
+  request id, the acknowledgement array (`base` + extra ids, per **D1**),
+  whether the request/response was injected-dropped and retried, the resulting
+  ordered history, and the piggybacked history hash (**D5**) with a ✓/✗ match
+  marker.
+- **Phase II failover demo.** Manually kill the net_http server, restart it on
+  the same port; it reloads the checkpointed JSON history; the libcurl client —
+  still retrying, unaware — resumes; the event log shows the "chat" continuing
+  across the restart, with history hashes still matching. (A real process/socket
+  is exactly why the demo uses the real transport.)
 
-Trade-off to note: this means the *demo* depends on the real libcurl/net_http
-build (Phase 1b), whereas *verification* does not. If you'd prefer the demo to
-also run purely on the simulated transport (no external build) — printing the
-same event log but simulating the "restart" in-process — that's a smaller,
-fully-self-contained alternative. **Which do you want: real-transport demo
-(recommended, needed for a genuine failover demo) or simulated-transport
-demo?**
+Implication: the **demo** depends on the real libcurl + net_http build
+(Phase 1b); **verification** does not (Phase 1a, self-contained).
 
 ---
 
-## 9. Review outcome (round 1) — summary
+## 9. Review outcome — summary
 
 - Q1–Q5 resolved as **D1–D6** (§2); ack encoding, id reuse, history encoding,
   buffer-release, hashing, and the total-order proof obligation are all pinned.
 - §7 A/B/C confirmed; D defaulted to repo-root layout.
 - §5 dependency approach and single-VM co-location confirmed.
-- **One open item:** demo transport (§8).
-- **Next step:** with your OK on §8, write **`docs/protocol.md`** formalizing
-  D1–D6, including the §2/D6 total-order proof.
+- §8 demo decided: real-transport, same VM, manually runnable, client-side-only
+  failure injection via the libcurl wrapper.
+- **No open items remain.** Pending your final review of this plan, the next
+  step is to write **`docs/protocol.md`** formalizing D1–D6, including the
+  §2/D6 total-order proof.
