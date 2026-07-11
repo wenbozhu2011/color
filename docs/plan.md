@@ -266,7 +266,7 @@ approach, and client + server run **locally on the same VM**.
 2. ✅ **`docs/protocol.md`** — Phase I wire format, headers, ordering rule, and
    the D1–D6 safety-property argument; revised per review (headers-only,
    version dropped, spec-gap §0, `Color-Hash` optional). *(f221ff0 → 4983b08)*
-3. ✅ **Prototype skeleton (this milestone)** — transport-agnostic Color core
+3. ✅ **Prototype skeleton** — transport-agnostic Color core
    (`src/core/`, compiled library), simulated lossy network, fuzzy driver, and
    invariant checker (`verification/`), C++17 + CMake. Proves the safety **and**
    liveness properties on seeded, reproducible runs; the checker is itself
@@ -277,7 +277,7 @@ approach, and client + server run **locally on the same VM**.
    - Status: **100/100 seeds pass** at default settings (~98k requests through
      ~154k drops + ~36k duplicates); passes under `--drop 0.8`; buffers stay
      bounded. `ctest` wires a smoke + high-loss suite. ← **done**
-4. ✅ **Real transport (this milestone)** — the same core behind real HTTP:
+4. ✅ **Real transport** — the same core behind real HTTP:
    - `src/client/` — libcurl client with a failure-injection wrapper (drops the
      request or the response); transport-level retry re-POSTs the identical
      request. **Builds and runs in this environment** (verified end-to-end
@@ -297,11 +297,23 @@ approach, and client + server run **locally on the same VM**.
    - CMake builds `color_client` when libcurl is found and `color_server` when
      libevent is found (`-DCOLOR_BUILD_SERVER=OFF` to skip); the core/
      verification build is unaffected. See `src/readme.md`. ← **done**
-5. ⬜ **Demo** — slowed, event-printing run over the real transport +
-   `demo/readme.md` (mechanism per §8). *(the `--verbose` event trace in the
-   harness is the basis for this.)*
+5. ✅ **Demo** — runnable client/server programs over the real
+   transport (§8), living in `demo/src/` and built from the same `src/` transport
+   libraries:
+   - `color_server` — net_http Color server (echo app); prints a `[commit]` line
+     per request as it commits in order.
+   - `color_client` — libcurl client that paces requests at a chosen rate,
+     injects request/response drops, retransmits, and prints each delivered reply
+     and every retried attempt. With `--hash` on both sides, a clean run reports
+     `hash mismatches=0`.
+   - `demo/readme.md` is self-contained: install deps → clone → build (CMake
+     only) → run in two terminals, with options and the one-conversation-per-
+     server / failover-is-Phase-II caveats.
+   - Run-verified in this environment (e.g. 40 messages × 4 parallel senders,
+     40% drop both ways, `--hash` → 0 mismatches). ← **done**
 6. ⬜ **`docs/failover.md` + Phase II** — checkpoint data structure, JSON
-   persistence, restart/replay, re-run verification, failover demo.
+   persistence, restart/replay, re-run verification, failover demo (kill/restart
+   the server on the same port while the client keeps going).
 
 Commit granularity: you direct this as we go; my default is one reviewable slice
 per commit to `main`.
