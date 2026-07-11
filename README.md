@@ -114,7 +114,7 @@ cd color
 ### Build
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release   # first run fetches net_http+abseil
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
