@@ -1,9 +1,8 @@
 // Color core — wire message model (transport-agnostic).
 //
-// These structs are what a transport (the simulated lossy network in the
-// verification harness, or the real libcurl<->net_http path later) moves
-// between the client and server. They mirror the Phase I header set defined in
-// docs/protocol.md:
+// These structs are what a transport (an in-process simulated network, or a
+// real HTTP client/server) moves between the client and server. The Color
+// metadata travels as HTTP headers:
 //   Request : Color-Seq, Color-Ack-Base, Color-Ack-New, Color-Hash(optional)
 //   Response: Color-Seq(echo), Color-Hash(optional)
 // The application payload is an opaque string (JSON in the reference app).
@@ -35,8 +34,9 @@ struct Response {
   Seq seq = 0;                 // Color-Seq: echoes the request id answered
   std::optional<Hash> hash;    // Color-Hash: optional, verification only
   std::string payload;         // response body (opaque to Color)
-  bool no_op = false;          // true => duplicate-after-ack ack (empty body),
-                               //   see docs/protocol.md §11.4
+  bool no_op = false;          // true => acknowledgement-only reply (empty body)
+                               //   sent when a duplicate request arrives after
+                               //   its response was already released
 };
 
 }  // namespace color

@@ -1,4 +1,4 @@
-// Color core — server state machine (docs/protocol.md §6), transport-agnostic.
+// Color core — server state machine, transport-agnostic.
 //
 // The server dedups requests by seq (exactly-once), releases buffered responses
 // as the client acknowledges them, and commits the shared history in strict id

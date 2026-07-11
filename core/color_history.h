@@ -1,16 +1,14 @@
-// Color core — committed history and its rolling hash (docs/protocol.md §4, §7).
+// Color core — committed history and its rolling hash.
 //
 // The committed history is one interleaved sequence of request events (R<seq>)
-// and response events (r<seq>). Both client and server build it by the same
-// deterministic procedure so that, on their common prefix, the two histories
-// are identical event-for-event (the safety invariant).
+// and response events (r<seq>). Both the client and the server build it by the
+// same deterministic procedure, so that on their common prefix the two
+// histories are identical event-for-event (the core safety invariant).
 //
-// The rolling hash chains over the event stream:  h_k = hash_step(h_{k-1}, e_k).
-// docs/protocol.md specifies SHA-256 truncated; for the self-contained
-// prototype we use a 64-bit FNV-1a-based chaining hash of identical *structure*
-// (h_k depends only on h_{k-1} and the event). The harness never relies on the
-// hash alone — it also deep-compares the full histories — so this stand-in is
-// sufficient to detect divergence at the exact event.
+// The rolling hash chains over the event stream: h_k = hash_step(h_{k-1}, e_k),
+// a 64-bit FNV-1a chain (keeps the core dependency-free). It lets the two peers
+// cross-check that their histories agree, but carries nothing the protocol
+// needs to function; each side may ignore it.
 #ifndef COLOR_COLOR_HISTORY_H
 #define COLOR_COLOR_HISTORY_H
 
@@ -36,14 +34,14 @@ struct Event {
   std::string str() const;
 };
 
-// Seed for the rolling hash (the H0 of docs/protocol.md §7).
+// Seed for the rolling hash (the initial value h_0).
 Hash hash_seed();
 
 // h_k = hash_step(h_{k-1}, event): chain the previous hash and the event string.
 Hash hash_step(Hash prev, const Event& e);
 
-// The committed history plus the running hash and the {event -> hash} map that
-// docs/protocol.md §7 (D5) describes. Shared by client and server.
+// The committed history plus its running rolling hash. Shared by client and
+// server.
 class History {
  public:
   History() : cur_hash_(hash_seed()) {}

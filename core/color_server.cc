@@ -6,7 +6,7 @@ namespace color {
 std::vector<Response> ColorServer::on_request(const Request& req) {
   std::vector<Response> out;
 
-  // 1. Apply the acknowledgement: release what the client has confirmed (D4).
+  // 1. Apply the acknowledgement: release responses the client has confirmed.
   release_acked(req);
 
   // 2. Exactly-once dedup: a retry of an already-committed request is not

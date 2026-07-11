@@ -1,4 +1,4 @@
-// Color core — client state machine (docs/protocol.md §5), transport-agnostic.
+// Color core — client state machine, transport-agnostic.
 //
 // The client assigns contiguous request ids, freezes each request (so retries
 // are byte-identical), records the receipt order of responses, and commits its
