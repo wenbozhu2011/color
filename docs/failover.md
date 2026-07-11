@@ -7,316 +7,297 @@ Phase II milestone.
 
 ---
 
-## 0. Headline: failover requires **no client-side changes**
+## 0. Headline: the client's **core protocol/algorithm is unchanged**
 
-**The client is completely unaware of failover. Nothing about the client —
-its wire format, its state, or its behaviour — changes for Phase II.** This is
-the central property of the design, so it comes first.
+Failover adds a recovery interaction, and that interaction does involve the
+client — but **the client's core conversational algorithm is unchanged.** The
+client still assigns monotonic `Color-Seq` ids, carries the same
+`Color-Ack-Base`/`Color-Ack-New` acknowledgement, retransmits until a response
+arrives, and ignores duplicates — byte-for-byte as in Phase I. Steady-state
+traffic is identical.
 
-Why it holds:
+What failover adds is a single **recovery step layered on top**: when a
+replacement server signals (with a `5xx`) that it is missing history the client
+already holds, the client **resends its known request/response history** so the
+new server can recover the responses it lost. Together, the `5xx` signal and the
+client's history replay give a **seamless** recovery — the conversation
+continues without the application noticing.
 
-- From the client's vantage point, a server failover is **indistinguishable from
-  ordinary message loss plus latency**: for a while some requests/responses do
-  not get through (the old server is gone, the new one isn't up yet, or is
-  rebuilding), and then they do. The Phase I client already copes with exactly
-  this by **retransmitting the identical request until a response arrives** and
-  **ignoring duplicate responses**. No new signal, status code, or message type
-  is introduced on the client.
-- The client already puts everything a recovering server needs **on every
-  request**: the `Color-Seq` id and the `Color-Ack-Base`/`Color-Ack-New`
-  acknowledgement. The new server reads these exactly as the old one did.
-- Recovery is achieved **entirely on the server side** by one rule (§2) plus a
-  checkpoint (§3). Because that rule guarantees the new server already holds
-  everything the client could still be waiting on, the client never has to
-  "help" the server catch up.
+Why the client must participate (this is the point I want to get right):
 
-In particular this design **does not** use the `5xx`-and-replay mechanism
-sketched in `spec.md` / `protocol.md` §12, because that *would* be a client-side
-change (the client would have to recognise the status and re-send a special
-history payload). §7 explains what we do instead and why it is preferable here.
+- A periodic checkpoint can lag the crash. After failover the new server is
+  missing the tail of the history — in particular **responses the client already
+  received but that were generated after the last checkpoint.**
+- Requests in that tail that the client has *not* yet had answered are recovered
+  for free: the client is still **retransmitting** them, so the new server simply
+  reprocesses them.
+- But responses the client *has* received are a different matter: the client will
+  **not** retransmit an already-answered request, so the new server can never
+  regenerate those responses on its own — and even if it reprocessed the request,
+  it might produce a *different* response, breaking the agreed history. **The
+  client is the only surviving holder of those exact responses.** Recovery
+  therefore requires the client to resend them.
 
-> The rest of this document justifies the headline. If you read only one more
-> section, read §2 (the rule) and §5 (why the three possible fates of a request
-> are all covered without the client doing anything new).
+So: not "no client changes", but "**the core algorithm is the same; failover adds
+one recovery step (respond to `5xx` by replaying known history).**"
 
 ---
 
 ## 1. Goal and failure model
 
 - **One logical conversation, one server *role*.** A single client talks to a
-  single logical server. At any moment exactly one server process serves the
-  conversation; a failover replaces that process with another (crash + restart on
-  the same port, a drain/migration, or a new process on a new host that requests
-  are routed to).
-- **Crash-stop.** The serving process may stop at any instant. The requirement is
-  that a replacement process, started from the persisted checkpoint, resumes the
+  single logical server. At any moment one server process serves the
+  conversation; a failover replaces it with another (crash + restart on the same
+  port, a drain/migration, or requests routed to a new process).
+- **Crash-stop.** The serving process may stop at any instant. A replacement,
+  started from the persisted checkpoint plus the client's replay, must resume the
   conversation with all Phase I safety and liveness properties intact.
-- **Checkpoint durability is assumed.** The checkpoint (§3) is written to storage
-  the replacement can read (a local file for the prototype/demo; shared/durable
-  storage in production). Total loss of the checkpoint is data loss beyond the
-  scope of failover — see §10.
+- **Checkpoint is periodic and may lag.** The server saves the message history to
+  storage periodically (a local JSON file for the prototype/demo; durable/shared
+  storage in production). The window between the last checkpoint and the crash is
+  recovered at runtime from the client (§3–§4).
 
-Safety/liveness targets are unchanged from Phase I: the client and server agree
-on one identical total order, requests are processed exactly once, and the
-conversation keeps making progress.
-
----
-
-## 2. The one rule: durable-before-release (the checkpoint fence)
-
-The server may **release (send) a response to the client only after the commit
-that produced it has been persisted in a checkpoint.**
-
-Concretely, the Phase I server loop (`protocol.md` §6) gains a fence:
-
-1. Commit requests in `Color-Seq` order and generate their responses into a
-   *pending-release* set (as today), but **do not send them yet**.
-2. **Periodically** (every `T` ms or every `N` commits — this is the
-   `requirements.md` "save the history as a JSON file, periodically") write the
-   checkpoint (§3), which includes `committed_upto` and every unacknowledged
-   response.
-3. **After** the checkpoint write succeeds, release the responses it just made
-   durable.
-
-The single consequence that powers everything else:
-
-> **If the client has received a response for `seq`, then `seq`'s commit is
-> durable in the checkpoint.** (A response is only released after it is
-> persisted.)
-
-Equivalently: the client can never be "ahead" of the checkpoint. Anything the
-client already knows, the next server already knows too.
-
-Checkpointing stays **periodic/batched** (not a disk write per request); the
-fence only delays a response's *release* to the next checkpoint boundary, adding
-at most one checkpoint interval of latency. That interval is the tunable
-throughput/latency/coverage knob (§8, §10).
+Safety/liveness targets are unchanged from Phase I: client and server agree on one
+identical total order, requests are processed exactly once, and the conversation
+keeps making progress.
 
 ---
 
-## 3. Checkpoint data structure
+## 2. Server checkpoint (the persisted message history)
 
-The checkpoint captures exactly the **active window** of the conversation — the
-part that is not yet settled — plus the running summary needed to continue.
-Everything the client has already acknowledged is settled and need not be
-replayed, so the checkpoint size is bounded by the in-flight window, not by the
-conversation length (§8).
+Periodically (every `T` ms or every `N` commits — the `requirements.md` "save the
+history as a JSON file, periodically") the server writes a checkpoint of its
+committed message history and the state needed to resume:
 
-Logical contents:
+| Field | Meaning |
+|---|---|
+| `committed_upto` | highest `Color-Seq` committed in order at checkpoint time |
+| `history_hash` | running history hash at `committed_upto` |
+| `history[]` | the committed request/response events in order, with response payloads: `{t:"R",seq}` / `{t:"r",seq,payload,hash}` |
+| `buffer_from` | lowest `seq` still unacknowledged (responses `≥` this are retained for retransmission) |
 
-| Field | Meaning | Used for |
-|---|---|---|
-| `committed_upto` | highest `Color-Seq` committed in order | resume ordering; classify retries |
-| `history_hash` | running history hash at `committed_upto` | continue the hash chain (verification) |
-| `buffer[]` | committed-but-**unacknowledged** responses: `{seq, payload, hash}` | answer retries exactly-once; echo `Color-Hash` |
-| `low_water` *(optional)* | all responses `< low_water` are acked+released | compaction bookkeeping |
-| `history[]` *(optional)* | full ordered events `{t:"R"/"r", seq}` | audit / verification deep-compare |
+`history[]` carries the **response payloads** because they are the app-visible
+content that must survive; request payloads for already-committed requests are not
+needed (those requests will not be reprocessed). The checkpoint is bounded by the
+active window — see §8.
 
-Reconstruction rule on load: everything `≤ committed_upto` is committed; those
-still in `buffer[]` are committed-but-unacked; those `≤ committed_upto` **not** in
-`buffer[]` are committed-and-acked (their responses were released and dropped).
-That three-way classification is all the new server needs to serve any retry
-(see §5). `history[]` is not required for correctness — the active window
-(`committed_upto`, `history_hash`, `buffer[]`) suffices; it is persisted in the
-prototype so the verification harness can deep-compare full histories.
+Checkpoint writes are atomic (write-temp-then-rename) so a crash mid-write leaves
+the previous good checkpoint intact.
 
 JSON layout (prototype):
 
 ```json
 {
   "version": 1,
-  "committed_upto": 128,
+  "committed_upto": 120,
   "history_hash": "0x9f3a1c...",
-  "low_water": 121,
-  "buffer": [
-    { "seq": 121, "payload": "{\"srv_ts\":...}", "hash": "0x7b19..." },
-    { "seq": 125, "payload": "{\"srv_ts\":...}", "hash": "0x4c02..." }
-  ],
-  "history": [ {"t":"R","seq":1}, {"t":"r","seq":1}, "…" ]
+  "buffer_from": 118,
+  "history": [
+    { "t": "R", "seq": 119 },
+    { "t": "r", "seq": 119, "payload": "{\"srv_ts\":...}", "hash": "0x7b19..." },
+    { "t": "R", "seq": 120 },
+    { "t": "r", "seq": 120, "payload": "{\"srv_ts\":...}", "hash": "0x4c02..." }
+  ]
 }
 ```
 
-Note `Color-Ack-Base` is already the client's compact statement of "all responses
-below this are received", so the server's `low_water`/`buffer` boundary is driven
-by the same acknowledgements it already processes in Phase I — no new bookkeeping.
+---
+
+## 3. What is missing after a failover, and who recovers it
+
+Let the checkpoint stop at `committed_upto = K`, while the old server had actually
+progressed to `M ≥ K` before crashing. The new server loads `K` and is missing
+`(K, M]`. Split that tail by whether the client already has the response:
+
+- **Unanswered requests** (client has not received a response). The client is
+  **still retransmitting** them. The new server reprocesses each retry and
+  produces its response — correct, because the client never saw a prior response
+  for that `seq` (exactly-once from the client's view). *Recovered by ordinary
+  retransmission; no new mechanism.*
+- **Answered responses** (client received the response, generated after the last
+  checkpoint). The client will **not** retransmit the request, so the new server
+  cannot regenerate the response, and must not invent a different one. *Recovered
+  only by the client resending it* — this is the `5xx`-and-replay path (§4).
+
+The client's acknowledgement is what exposes the second case: a post-failover
+request carries `Color-Ack-Base = B` (and `Color-Ack-New`) asserting the client
+holds responses the new server has no record of (`B-1 > K`). That mismatch is the
+trigger.
 
 ---
 
-## 4. Failover sequence
+## 4. The `5xx`-and-replay recovery protocol
+
+1. **Detect.** The new server receives a request whose acknowledgement references
+   history it lacks — `Color-Ack-Base` (or an id in `Color-Ack-New`) names a
+   response `seq` it has not committed. It cannot honour the request yet.
+2. **Signal.** The server replies with a **`5xx`** (a dedicated recovery status,
+   e.g. `503` carrying `Color-Recover: from=<K+1>`), telling the client the lowest
+   `seq` from which it needs history. This is the only new status the client must
+   recognise.
+3. **Replay.** The client resends its **known request/response history from
+   `K+1`** as a single JSON-enveloped **replay request** (`Color-Replay: 1`): the
+   ordered events it knows, with the **response payloads and hashes** it received.
+   This is exactly the "encode multiple requests and responses as message history
+   in a single request body" from `requirements.md`.
+4. **Rebuild.** The server ingests the replay: it appends the replayed events to
+   its committed history in order, adopting the client's exact response payloads,
+   advancing `committed_upto` and `history_hash`, and re-populating the
+   retransmission buffer for any responses still unacknowledged. It replies `200`
+   to the replay.
+5. **Resume.** The client continues normally — retransmitting still-pending
+   requests and issuing new ones. The new server now has the history it needs to
+   order and answer them. Steady state is Phase I again.
+
+Replay envelope (JSON body of the replay request):
+
+```json
+{
+  "from": 121,
+  "events": [
+    { "t": "R", "seq": 121 },
+    { "t": "r", "seq": 121, "payload": "…", "hash": "0x…" },
+    { "t": "R", "seq": 122 },
+    { "t": "R", "seq": 123 },
+    { "t": "r", "seq": 123, "payload": "…", "hash": "0x…" },
+    { "t": "r", "seq": 122, "payload": "…", "hash": "0x…" }
+  ]
+}
+```
+
+The replay is **idempotent**: if the server already advanced past part of it (or a
+replay is duplicated by retransmission), the server ignores events at or below its
+current `committed_upto`. A lost replay is simply re-triggered by the next `5xx`.
+
+---
+
+## 5. Scope of the client-side change
+
+The change to the client is deliberately small and **orthogonal to the core
+algorithm**:
+
+- **Unchanged:** `Color-Seq` assignment, `Color-Ack-Base`/`Color-Ack-New`
+  construction, the total-order/commit logic, retransmission, duplicate handling —
+  every steady-state request is byte-identical to Phase I.
+- **Added:** (a) recognise the `5xx`/`Color-Recover` response; (b) build a replay
+  envelope from the request/response history the client already retains; (c) POST
+  it; then continue. The client already *keeps* its received responses (it commits
+  them into its own history), so replay is a read-out of existing state, not new
+  bookkeeping.
+
+A "manual" REST client that does not implement recovery still works against a
+server that never fails over (Phase I), and degrades to a stall (not a safety
+violation) if it meets a `5xx` it ignores — so the recovery behaviour is an
+opt-in capability, not a change to the wire contract for the steady state.
+
+---
+
+## 6. Failover sequence
 
 ```
-… old server: commit K+1..M, checkpoint(committed_upto=M', buffer=…), release durable responses, CRASH …
-        │
-        │  (client keeps sending / retransmitting; connections fail → retried)
+old server: commit … K (checkpoint) … K+1..M, release responses, CRASH
+        │        (client keeps sending / retransmitting; connections fail → retried)
         ▼
 new server starts on the same port
-   ├─ load checkpoint  → committed_upto, history_hash, buffer[]
+   ├─ load checkpoint → committed_upto = K, history_hash, history[], buffer
    ├─ StartAcceptingRequests
    ▼
-client's in-flight retries + new requests arrive (unchanged Phase I requests)
-   ├─ apply Color-Ack-Base/New → release now-acked buffered responses (Phase I D-rule)
-   ├─ seq ≤ committed_upto and in buffer      → resend the buffered response (no reprocess)
-   ├─ seq ≤ committed_upto and not in buffer  → already acked → no-op ack reply
-   └─ seq > committed_upto                     → stage and commit in order, run app, buffer, (fence) release
+client request P arrives (ack_base = B)
+   ├─ B-1 ≤ K → server already has the referenced history → serve normally
+   └─ B-1 > K → server is missing (K, B-1]  → reply 5xx Color-Recover: from=K+1
+            │
+            ▼
+   client → POST replay envelope (events K+1 … with response payloads)
+            │
+            ▼
+   server rebuilds committed history to the client's frontier, replies 200
+   client resumes: retransmits pending requests, issues new ones (Phase I steady state)
 ```
 
-The client does nothing special anywhere in this diagram; it is retransmitting
-and acknowledging exactly as in Phase I.
+---
+
+## 7. Interaction with the Phase I mechanisms
+
+- **Exactly-once.** After rebuild, `committed_upto` + the buffer classify retries
+  exactly as in Phase I: `≤ committed_upto` and buffered → resend; `≤` and not
+  buffered → already acked (no-op); `>` → new. Unanswered requests in `(K,M]` that
+  the client retransmits are (re)processed once by the new server, since the client
+  never held a response for them.
+- **Total order & hash.** The replay carries the client's exact ordering and
+  response payloads, so the rebuilt history is identical to the client's and the
+  running `history_hash` re-converges; the piggybacked `Color-Hash` matches again
+  after rebuild. Recovery restores the *exact* history, not an approximation.
+- **Buffer release (D4).** Unchanged; post-failover acknowledgements release the
+  rebuilt buffer as usual.
+- **Staging.** Out-of-order, not-yet-committed requests are not persisted; they are
+  unacknowledged, so the client retransmits them and they re-stage naturally.
 
 ---
 
-## 5. Why zero client changes suffices — the three fates of a request
+## 8. Bounding checkpoint and replay size
 
-At the instant of the crash, consider any request `seq`. It is in exactly one of
-three states, and each is handled by the new server using only Phase I client
-behaviour (retry + ignore-duplicates):
+Both the checkpoint's `history[]` and the replay envelope need only cover the
+**active window** — from the acknowledged low-water (`Color-Ack-Base`) upward.
+Everything the client has acknowledged is settled on both sides and can be
+compacted to `committed_upto` + `history_hash`; the client need not retain, and
+need not replay, below that frontier. So both are `O(in-flight window + checkpoint
+lag)`, independent of total conversation length — the same boundedness argument as
+the Phase I retransmission buffer (`protocol.md` §10, L2).
 
-1. **Never durably committed** (the old server never received it, or crashed
-   before a checkpoint covered it). By the fence (§2) its response was never
-   released, so **the client never received a response** → the client is still
-   **retransmitting** `seq`. The new server has no record of it and processes the
-   retry **fresh, exactly once**. ✓
-2. **Durably committed, response released, not yet acknowledged.** The response is
-   in the checkpoint `buffer[]`. If the client hadn't received it, it retries →
-   the new server **resends the buffered response** (no reprocessing). If the
-   client had received it, a stray retry likewise returns the buffered response,
-   and the client **ignores the duplicate**. ✓
-3. **Durably committed and acknowledged** (client has the response and acked it;
-   the old server dropped it from the buffer). Then `committed_upto ≥ seq` in the
-   checkpoint and the client **will not retry** `seq`. Nothing to do. ✓
-
-**Liveness / no permanent gap.** Every acknowledged request is `≤ committed_upto`
-(case 3, durable by the fence), and every request the new server still needs to
-fill the range `> committed_upto` is unacknowledged, hence being retransmitted
-(cases 1–2). So the new server eventually receives every request required to
-advance `committed_upto` in order — there is no gap that only an un-retried
-request could fill. This is the property the naïve "periodic checkpoint without
-the fence" design lacks (a post-checkpoint *acked* request would be a gap the
-client never resends); the fence is exactly what removes it **without** asking
-the client to replay.
-
----
-
-## 6. Interaction with the Phase I mechanisms
-
-- **Exactly-once (`processed`/dedup).** Reconstructed from `committed_upto` +
-  `buffer[]`: retries `≤ committed_upto` are served without invoking the
-  application; the app resumes only for `seq > committed_upto`.
-- **Buffer release (D4).** Unchanged. The client's `Color-Ack-Base`/`Color-Ack-New`
-  on post-failover requests release the reloaded `buffer[]` entries just as in
-  Phase I.
-- **Total order & hash (§4/§7 of protocol.md).** The new server continues the
-  committed history from `committed_upto` with `history_hash` as the running
-  value, so the piggybacked `Color-Hash` continues to match the client's — hash
-  verification survives the failover seamlessly, because durable-before-release
-  guarantees the histories never diverged in the first place.
-- **In-order commit / staging.** `pending_reqs` (out-of-order arrivals not yet
-  committed) is **not** persisted; those requests were unacknowledged, so the
-  client retransmits them and they re-stage naturally.
-
----
-
-## 7. What we deliberately do NOT use: the `5xx` replay
-
-`spec.md` sketches an alternative: on failover the server answers a request with
-a special `5xx`, and the client re-sends its known request/response history in a
-dedicated JSON-enveloped request so the new server can rebuild.
-
-We **do not** adopt it, because recognising the `5xx` and constructing a replay
-payload is a **client-side change** — precisely what §0 rules out. The
-durable-before-release fence achieves the same recovery entirely server-side.
-
-Trade-off (stated honestly):
-
-- **This design (fence):** zero client changes; costs at most one checkpoint
-  interval of added response latency, and requires the checkpoint to be written
-  on the release path.
-- **`5xx` replay:** no per-commit durability fence (cheaper server writes), but
-  requires client cooperation and a new request type, and the replay payload can
-  be large. It also only helps when the client still holds the relevant history.
-
-Given the project's stated priority ("no client-side changes"), the fence wins.
-The `5xx` path remains a possible future option for **cold recovery** (total
-checkpoint loss, §10), where no server-side state survives and client replay is
-the only source of truth — but that is out of scope for Phase II.
-
-*(This supersedes the Phase II sketch in `protocol.md` §12, which will be updated
-to point here.)*
-
----
-
-## 8. Bounded checkpoint size (compaction)
-
-The checkpoint stores only the **active window**: `committed_upto`,
-`history_hash`, and the unacknowledged `buffer[]`. As the client acknowledges
-responses (advancing `Color-Ack-Base`), settled entries drop out of `buffer[]`
-and `low_water` advances. Therefore the checkpoint size is `O(in-flight window)`,
-independent of total conversation length — the same boundedness argument as the
-Phase I retransmission buffer (`protocol.md` §10, L2). The optional `history[]`
-audit array is the only unbounded field and is a prototype/verification
-convenience, not a protocol requirement; production compacts it to the running
-`history_hash`.
-
-The checkpoint **interval** trades three things: longer interval → less
-persistence overhead but more added release latency and more post-crash
-re-processing of never-released commits (case 1); shorter interval → the reverse.
+The checkpoint **interval** is the tunable knob: a longer interval means cheaper
+persistence but a larger post-crash gap to recover (more retransmission and a
+larger replay); a shorter interval, the reverse.
 
 ---
 
 ## 9. Verification across failover, and the demo
 
 - **Verification (simulated).** Extend the harness (`verification/`) to, mid-run,
-  serialize the `ColorServer` to a checkpoint and reconstruct a **fresh**
-  `ColorServer` from it (optionally dropping the un-fenced tail to model a crash
-  between checkpoints), then continue driving the same client against the new
-  server. The existing checker must still pass: histories agree (exact-prefix),
-  exactly-once holds across the boundary, and buffers stay bounded. Because the
-  client object is untouched across the swap, this also *demonstrates* the
-  no-client-changes property in code.
+  serialize the `ColorServer` to a checkpoint, discard the post-checkpoint tail to
+  model a crash, and reconstruct a **fresh** `ColorServer` from the checkpoint —
+  then keep driving the **same** client against it. The client hits the `5xx`,
+  replays, and the run continues; the existing checker must still pass (histories
+  agree by exact prefix, exactly-once holds across the boundary, buffers stay
+  bounded). Because the client object is otherwise untouched, this exercises the
+  §5 recovery step and confirms the core client algorithm is unchanged.
 - **Demo (real transport).** As in `demo/readme.md`: run `color_server` with
   periodic checkpointing to a JSON file; start `color_client`; **kill the server
-  and restart it on the same port**; the new process loads the checkpoint and the
-  "chat" continues, with `hash mismatches=0` straight through the restart. The
-  client command line is identical to the Phase I demo — nothing about running
-  the client changes.
+  and restart it on the same port**; the client's next request triggers the `5xx`,
+  the client replays, and the "chat" continues with `hash mismatches=0` through the
+  restart. The client is invoked identically to the Phase I demo.
 
 ---
 
 ## 10. Assumptions and limits
 
-- **Checkpoint availability.** The replacement must be able to read the
-  checkpoint (same disk for restart-in-place; shared/durable storage for
-  migration to another host). This is assumed available and consistent.
-- **Single-writer checkpoints.** Exactly one server writes the checkpoint at a
-  time; failover is not concurrent (no two servers serving the same conversation
-  simultaneously). A checkpoint write should be atomic (write-temp-then-rename)
-  so a crash mid-write leaves the previous good checkpoint intact.
-- **Cold recovery (total checkpoint loss) is out of scope.** With no surviving
-  state, only client replay (the `5xx` path, §7) could rebuild the conversation —
-  and that would reintroduce a client-side change. Phase II assumes the
-  checkpoint survives.
-- **Application idempotence for case 1.** A request that was received but never
-  durably committed is reprocessed after failover. This is exactly-once *from the
-  client's view* (it never saw a prior response), but the application's own side
-  effects for that `seq` run on the new server. The reference echo app is pure;
-  stateful apps should keep their effects inside the committed-history path so
-  durability covers them too.
+- **Checkpoint availability.** The replacement must read the checkpoint (same disk
+  for restart-in-place; shared/durable storage for migration). Assumed available
+  and consistent.
+- **Single active server.** Exactly one server serves the conversation at a time;
+  failover is not concurrent.
+- **Client retention.** The client must retain the responses it may need to replay
+  — i.e. its history above the acknowledged low-water (bounded, §8). If the
+  checkpoint is older than the client's retained frontier, recovery cannot bridge
+  the gap (a degenerate case; keep checkpoints within the retained window).
+- **Application effects for reprocessed requests.** An unanswered request in the
+  gap is reprocessed on the new server; this is exactly-once from the client's
+  view (it saw no prior response), but the app's side effects for that `seq` run on
+  the new server. The reference echo app is pure; stateful apps should keep effects
+  inside the committed-history path so checkpoint + replay cover them.
 
 ---
 
 ## 11. Open questions for review
 
-- **Q1. Fence vs. lighter variant.** Recommended: durable-before-release (exact
-  history preserved, hash verification survives). A lighter alternative keeps
-  purely-periodic checkpoints (no release fence) and, on failover, advances over
-  any post-checkpoint *acked* gap using the client's `Color-Ack-Base`
-  ("phantom-fill") — also zero client changes, cheaper, but the new server no
-  longer holds the exact tokens for the gap, so history/hash must be re-baselined
-  across the failover. Do you want the exact-history fence, or the cheaper
-  re-baseline variant?
-- **Q2. Checkpoint scope.** Persist the full `history[]` (simplest; lets
-  verification deep-compare) or only the active window + `history_hash`
-  (bounded, production-shaped)? Proposed: full history in the prototype behind a
-  flag, active-window by default.
-- **Q3. Checkpoint cadence.** Time-based (`T` ms), count-based (`N` commits), or
-  both? Proposed: both, whichever comes first, tunable via flags.
+- **Q1. Recovery status code / signalling.** Proposed: a `5xx` (e.g. `503`) plus a
+  `Color-Recover: from=<seq>` header and a `Color-Replay: 1` request marker. OK, or
+  do you want a dedicated status code / endpoint for the replay?
+- **Q2. Replay scope.** Replay from the server-requested `from=<seq>` (server-
+  driven, minimal) vs. the client always replaying from its retained low-water
+  (client-driven, simpler)? Proposed: server-driven `from`, client clamps to what
+  it retains.
+- **Q3. Checkpoint cadence & payloads.** Time-based, count-based, or both; and
+  persist full `history[]` payloads (needed so the *server-side* checkpoint alone
+  can answer already-acked retries) vs. only the unacknowledged tail (smaller,
+  relies more on replay). Proposed: both cadences (whichever first); persist the
+  unacknowledged tail plus `history_hash`, recover the rest via replay.

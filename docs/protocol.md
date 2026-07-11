@@ -633,15 +633,16 @@ acknowledged that response), so the reply is harmlessly discarded.
 
 ## 12. Forward pointer to Phase II (failover)
 
-Phase II (`docs/failover.md`) adds server failover with **no client-side
-changes at all** — the client keeps retransmitting and acknowledging exactly as
-above, unaware that the server process was replaced. The server periodically
-checkpoints its active window (`committed_upto`, the running history hash, and
-the unacknowledged responses; note `Color-Ack-Base` is already the compact form
-of "what the client has confirmed") and obeys one rule: **release a response only
-after its commit is durable in a checkpoint.** That rule guarantees a
-replacement server, loaded from the checkpoint, already holds everything the
-client could still be waiting on, so ordinary client retries drive recovery. The
-Phase I wire rules above are unchanged. (This design deliberately does **not** use
-the `5xx`-and-replay approach sketched in `spec.md`, which would require the
-client to change; see `docs/failover.md` §7.)
+Phase II (`docs/failover.md`) adds server failover while keeping the client's
+**core algorithm unchanged** — it keeps assigning ids, acknowledging, and
+retransmitting exactly as above. The server periodically checkpoints its
+committed message history (note `Color-Ack-Base` is already the compact form of
+"what the client has confirmed"). Because a periodic checkpoint can lag the
+crash, a replacement server can be missing recent history — in particular
+responses the client already received but will never re-request. It recovers
+these via a small **recovery step layered on top**: when the new server sees a
+request acknowledging history it lacks, it returns a `5xx`, and the client
+resends its known request/response history (a JSON-enveloped replay) so the
+server can rebuild the exact history. Steady-state wire rules above are
+unchanged; the replay is the only addition, and it does not alter the core
+conversational algorithm. See `docs/failover.md`.
