@@ -1,9 +1,9 @@
 # Color
 
-**Color is a general spec for REST-based conversational communication between 
+**Color refers to a general spec for REST-based conversational communication between 
 a client and server.** It gives an ordinary stateless REST/HTTP
-endpoint the guarantees a bidi conversation needs without exposing any stateful endpoint.
-Color also supports seamless server failover.
+endpoint the guarantees that a bidi conversation needs without exposing any stateful endpoint.
+Color also enables seamless server failover.
 
 This repository contains the protocol design and a working C++ prototype
 (core library as a framework, verification & proof, and a runnable client/server demo).
