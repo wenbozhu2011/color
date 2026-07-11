@@ -2,7 +2,7 @@
 
 Two kinds of documents live here.
 
-## Provided (authored by the project owner)
+## Provided (authored by the repo owner)
 
 These are the inputs that define the task; they are the source of truth for
 *what* Color must be.
@@ -15,7 +15,7 @@ These are the inputs that define the task; they are the source of truth for
 ## Generated (in [`claude/`](claude/))
 
 The documents under `claude/` are the **planning and design artifacts generated
-by Claude and reviewed/approved by the project owner** while building Color. They
+by Claude and reviewed/approved by the repo owner** while building Color. They
 elaborate the provided spec and requirements into a concrete design and record
 the decisions made along the way.
 
