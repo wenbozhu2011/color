@@ -17,8 +17,8 @@
 #include <string>
 #include <vector>
 
-#include "color/client.h"
-#include "color/server.h"
+#include "color_client.h"
+#include "color_server.h"
 
 namespace color {
 
@@ -40,15 +40,15 @@ inline CheckResult check_run(const ColorClient& client, const ColorServer& serve
   CheckResult r;
 
   // SAFETY: server history is an exact prefix of client history.
-  const auto& ch = client.history().tokens();
-  const auto& sh = server.history().tokens();
+  const auto& ch = client.history().events();
+  const auto& sh = server.history().events();
   r.require(sh.size() <= ch.size(),
             "server history longer than client history (" +
                 std::to_string(sh.size()) + " > " + std::to_string(ch.size()) + ")");
   std::size_t common = std::min(sh.size(), ch.size());
   for (std::size_t i = 0; i < common; ++i) {
     if (sh[i] != ch[i]) {
-      r.require(false, "history divergence at token " + std::to_string(i) +
+      r.require(false, "history divergence at event " + std::to_string(i) +
                            ": server=" + sh[i].str() + " client=" + ch[i].str());
       break;
     }

@@ -17,10 +17,13 @@ endif()
 
 add_compile_options(-Wall -Wextra)
 
-# Transport-agnostic Color core: header-only interface library.
-add_library(color_core INTERFACE)
-target_include_directories(color_core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/core/include)
-target_compile_features(color_core INTERFACE cxx_std_17)
+# Transport-agnostic Color core: compiled static library.
+add_library(color_core STATIC
+  core/color_history.cc
+  core/color_client.cc
+  core/color_server.cc)
+target_include_directories(color_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core)
+target_compile_features(color_core PUBLIC cxx_std_17)
 
 enable_testing()
 add_subdirectory(verification)

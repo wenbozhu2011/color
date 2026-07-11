@@ -7,8 +7,8 @@
 //   Request : Color-Seq, Color-Ack-Base, Color-Ack-New, Color-Hash(optional)
 //   Response: Color-Seq(echo), Color-Hash(optional)
 // The application payload is an opaque string (JSON in the reference app).
-#ifndef COLOR_MESSAGE_H
-#define COLOR_MESSAGE_H
+#ifndef COLOR_COLOR_MESSAGE_H
+#define COLOR_COLOR_MESSAGE_H
 
 #include <cstdint>
 #include <optional>
@@ -18,7 +18,7 @@
 namespace color {
 
 using Seq = std::uint64_t;
-using Hash = std::uint64_t;  // rolling history hash (see history.h)
+using Hash = std::uint64_t;  // rolling history hash (see color_history.h)
 
 // A Color request (an HTTP POST carrying the headers above + a body).
 struct Request {
@@ -41,4 +41,4 @@ struct Response {
 
 }  // namespace color
 
-#endif  // COLOR_MESSAGE_H
+#endif  // COLOR_COLOR_MESSAGE_H

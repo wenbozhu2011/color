@@ -21,8 +21,8 @@
 #include <vector>
 
 #include "checker.h"
-#include "color/client.h"
-#include "color/server.h"
+#include "color_client.h"
+#include "color_server.h"
 #include "sim_network.h"
 
 namespace {
@@ -89,7 +89,7 @@ RunStats run_one(std::uint64_t seed, const Config& cfg) {
       while (out < cfg.parallel) {
         std::string p = "cli-ts=" + std::to_string(now) + ";n=" +
                         std::to_string(rng() & 0xffff);
-        send_request(client.generate_and_track(p));
+        send_request(client.generate_request(p));
         ++out;
       }
     }

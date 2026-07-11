@@ -10,17 +10,17 @@ libcurl ↔ net_http transport (milestones 4–5).
 ## Layout
 
 ```
-core/include/color/       transport-agnostic Color core (header-only)
-  message.h                 Request / Response wire structs (the header set)
-  history.h                 committed history + rolling hash (§4, §7)
-  client.h                  ColorClient state machine (§5)
-  server.h                  ColorServer state machine (§6)
+core/                       transport-agnostic Color core (compiled library)
+  color_message.h             Request / Response wire structs (the header set)
+  color_history.h/.cc         committed history + rolling hash (§4, §7)
+  color_client.h/.cc          ColorClient state machine (§5)
+  color_server.h/.cc          ColorServer state machine (§6)
 verification/
-  plan.md                   this document
+  plan.md                     this document
   src/
-    sim_network.h           SimLink: seeded drop / duplicate / delay / reorder
-    checker.h               invariant checker (safety + liveness + bounds)
-    fuzz_main.cpp           the fuzzy driver + CLI + multi-seed loop
+    sim_network.h             SimLink: seeded drop / duplicate / delay / reorder
+    checker.h                 invariant checker (safety + liveness + bounds)
+    fuzz_main.cpp             the fuzzy driver + CLI + multi-seed loop
 ```
 
 ## What the harness does
