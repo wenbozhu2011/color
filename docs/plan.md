@@ -269,9 +269,11 @@ approach, and client + server run **locally on the same VM**.
 3. ✅ **Prototype skeleton (this milestone)** — transport-agnostic Color core
    (`src/core/`, compiled library), simulated lossy network, fuzzy driver, and
    invariant checker (`verification/`), C++17 + CMake. Proves the safety **and**
-   liveness
-   properties on seeded, reproducible runs; the checker is itself validated by a
-   negative test. See `verification/plan.md`.
+   liveness properties on seeded, reproducible runs; the checker is itself
+   validated by a negative test. Requests arrive as a **Poisson process**
+   (stochastic arrivals, capped by the flow-control window) so the interleavings
+   are genuinely varied. See `verification/plan.md`; build/run in
+   `verification/readme.md`.
    - Status: **100/100 seeds pass** at default settings (~98k requests through
      ~154k drops + ~36k duplicates); passes under `--drop 0.8`; buffers stay
      bounded. `ctest` wires a smoke + high-loss suite. ← **done**
