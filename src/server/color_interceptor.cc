@@ -6,7 +6,7 @@
 #include <sstream>
 #include <vector>
 
-#include "color_json.h"
+#include "failover_json.h"
 #include "net_http/public/response_code_enum.h"
 
 namespace color {
@@ -144,6 +144,20 @@ net_http::InterceptResult ColorInterceptor::OnRequest(
   return net_http::InterceptResult::kExit;
 }
 
+// Checkpoint sync semantics.
+//
+// Checkpointing is SYNCHRONOUS and happens on the request/executor thread while
+// the conversation mutex (mu_) is held, every `checkpoint_every_` commits. So a
+// checkpoint fully completes — snapshot serialized and durably renamed into
+// place — before any subsequent request is processed. Two consequences:
+//   - Because it runs under mu_, the snapshot is taken from a consistent core
+//     state (no request can mutate the core mid-serialize).
+//   - It briefly blocks request processing for the duration of the file write;
+//     with a small `checkpoint_every_` the pauses are frequent but short.
+// This is deliberately the simplest correct scheme. A production server would
+// move the write off the hot path — snapshot under mu_, then serialize/fsync on
+// a background or timer thread — trading this sync simplicity for lower latency
+// (see docs/failover.md §8).
 void ColorInterceptor::MaybeCheckpoint(std::size_t committed) {
   if (checkpoint_path_.empty() || checkpoint_every_ == 0) return;
   commits_since_ckpt_ += committed;
@@ -153,6 +167,10 @@ void ColorInterceptor::MaybeCheckpoint(std::size_t committed) {
   }
 }
 
+// Serialize the checkpoint and swap it into place atomically. Writing to a
+// temp file and renaming means a crash mid-write cannot corrupt the live
+// checkpoint: a replacement server always reads either the old or the new whole
+// file, never a partial one. Caller holds mu_.
 void ColorInterceptor::WriteCheckpoint() {
   std::string json = to_json(core_->checkpoint());
   std::string tmp = checkpoint_path_ + ".tmp";

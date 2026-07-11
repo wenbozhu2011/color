@@ -5,7 +5,7 @@
 #include <cstring>
 #include <thread>
 
-#include "color_json.h"
+#include "failover_json.h"
 
 namespace color {
 

@@ -4,8 +4,8 @@
 // cross a boundary — the persisted Checkpoint (a JSON file) and the Replay (a
 // JSON request body) — to and from JSON. Shared by the libcurl client and the
 // net_http server so both agree on the encoding.
-#ifndef COLOR_COLOR_JSON_H
-#define COLOR_COLOR_JSON_H
+#ifndef COLOR_FAILOVER_JSON_H
+#define COLOR_FAILOVER_JSON_H
 
 #include <string>
 
@@ -21,4 +21,4 @@ bool from_json_replay(const std::string& s, Replay& out);
 
 }  // namespace color
 
-#endif  // COLOR_COLOR_JSON_H
+#endif  // COLOR_FAILOVER_JSON_H
