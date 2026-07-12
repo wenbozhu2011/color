@@ -13,13 +13,13 @@ This repository contains the protocol design and a working C++ prototype
 ## 1. Core concept
 
 Many services are *conversational*: every server message is a response caused by
-a client request, and the order of those messages matters (think of a high-rate
+a client request, and the order of those messages matters (think of a high-hz
 chatbot). The obvious implementation — a bidi stream — is stateful,
 which makes it harder to scale and load-balance, and hides the request/response
 causality from the serving infrastructure.
 
 Color keeps the endpoint **stateless** (only non-streamed `POST` RPCs, retried by an
-ordinary HTTP client) while still delivering well-defined semantics for the conversation
+ordinary HTTP client) while still guaranteeing well-defined communication semantics
 even when multiple requests and responses are generated concurrently and they may
 be arbitrarily dropped, duplicated, or reordered.
 
@@ -29,7 +29,7 @@ be arbitrarily dropped, duplicated, or reordered.
 
 The protocol logic lives in a small, transport-agnostic **core framework library**
 (`src/core/`). Its correctness is *proved* by a verification harness
-(`verification/`) that runs the real core over a **simulated lossy network**
+(`verification/`) that runs the core over a **simulated lossy network**
 (seeded drop / duplicate / delay / reorder) across hundreds of randomized runs
 and checks, on every run:
 
